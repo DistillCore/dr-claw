@@ -1233,6 +1233,15 @@ async function deleteProject(projectName, force = false) {
     // Remove the project directory (includes all Claude sessions)
     await fs.rm(projectDir, { recursive: true, force: true });
 
+    // Delete the actual project folder from disk
+    if (projectPath) {
+      try {
+        await fs.rm(projectPath, { recursive: true, force: true });
+      } catch (err) {
+        console.warn(`Failed to delete project folder ${projectPath}:`, err.message);
+      }
+    }
+
     // Delete all Codex sessions associated with this project
     if (projectPath) {
       try {
