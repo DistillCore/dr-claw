@@ -50,6 +50,9 @@ export default function AppContent() {
     openSettings,
     fetchProjects,
     sidebarSharedProps,
+    pendingAutoIntake,
+    handleProjectCreatedWithIntake,
+    clearPendingAutoIntake,
   } = useProjectsState({
     sessionId,
     navigate,
@@ -88,6 +91,16 @@ export default function AppContent() {
       }
     };
   }, [openSettings]);
+
+  useEffect(() => {
+    window.handleProjectCreatedWithIntake = handleProjectCreatedWithIntake;
+
+    return () => {
+      if (window.handleProjectCreatedWithIntake === handleProjectCreatedWithIntake) {
+        delete window.handleProjectCreatedWithIntake;
+      }
+    };
+  }, [handleProjectCreatedWithIntake]);
 
   useEffect(() => {
     if (!isConnected) {
@@ -214,6 +227,8 @@ export default function AppContent() {
           onNavigateToSession={(targetSessionId: string) => navigate(`/session/${targetSessionId}`)}
           onShowSettings={() => setShowSettings(true)}
           externalMessageUpdate={externalMessageUpdate}
+          pendingAutoIntake={pendingAutoIntake}
+          clearPendingAutoIntake={clearPendingAutoIntake}
         />
       </div>
 

@@ -70,7 +70,7 @@ function getPreferredProvider(selectedSession) {
   return 'claude';
 }
 
-function Shell({ selectedProject, selectedSession, initialCommand, isPlainShell = false, onProcessComplete, minimal = false, autoConnect = false }) {
+function Shell({ selectedProject, selectedSession, initialCommand, isPlainShell = false, onProcessComplete, minimal = false, autoConnect = false, wsPath = '/shell' }) {
   const { t } = useTranslation('chat');
   const terminalRef = useRef(null);
   const terminal = useRef(null);
@@ -144,7 +144,7 @@ function Shell({ selectedProject, selectedSession, initialCommand, isPlainShell 
 
       if (IS_PLATFORM) {
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        wsUrl = `${protocol}//${window.location.host}/shell`;
+        wsUrl = `${protocol}//${window.location.host}${wsPath}`;
       } else {
         const token = localStorage.getItem('auth-token');
         if (!token) {
@@ -153,7 +153,7 @@ function Shell({ selectedProject, selectedSession, initialCommand, isPlainShell 
         }
 
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        wsUrl = `${protocol}//${window.location.host}/shell?token=${encodeURIComponent(token)}`;
+        wsUrl = `${protocol}//${window.location.host}${wsPath}${wsPath.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}`;
       }
 
       ws.current = new WebSocket(wsUrl);

@@ -123,6 +123,7 @@ export function useChatComposerState({
   const [imageErrors, setImageErrors] = useState<Map<string, string>>(new Map());
   const [isTextareaExpanded, setIsTextareaExpanded] = useState(false);
   const [thinkingMode, setThinkingMode] = useState('none');
+  const [intakeGreeting, setIntakeGreeting] = useState<string | null>(null);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const inputHighlightRef = useRef<HTMLDivElement>(null);
@@ -515,6 +516,20 @@ export function useChatComposerState({
         messageContent = `${selectedThinkingMode.prefix}: ${currentInput}`;
       }
 
+      // Inject intake greeting context for the first message after auto-intake
+      if (intakeGreeting) {
+        setChatMessages((previous) => [
+          ...previous,
+          {
+            type: 'assistant',
+            content: intakeGreeting,
+            timestamp: new Date(),
+          },
+        ]);
+        messageContent = `[Context: You have already greeted me as VibeLab's research assistant and asked about my research project. Continue the intake conversation without re-greeting.]\n\n${messageContent}`;
+        setIntakeGreeting(null);
+      }
+
       let uploadedImages: unknown[] = [];
       if (attachedImages.length > 0) {
         const formData = new FormData();
@@ -701,6 +716,7 @@ export function useChatComposerState({
       setIsUserScrolledUp,
       slashCommands,
       thinkingMode,
+      intakeGreeting,
     ],
   );
 
@@ -1039,5 +1055,7 @@ export function useChatComposerState({
     handleGrantToolPermission,
     handleInputFocusChange,
     isInputFocused,
+    intakeGreeting,
+    setIntakeGreeting,
   };
 }

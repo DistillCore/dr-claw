@@ -5,6 +5,8 @@ import type { RefObject } from 'react';
 import MessageComponent from './MessageComponent';
 import AgentTurnContainer from './AgentTurnContainer';
 import ProviderSelectionEmptyState from './ProviderSelectionEmptyState';
+import SessionProviderLogo from '../../../SessionProviderLogo';
+import { Markdown } from './Markdown';
 import type { ChatMessage } from '../../types/types';
 import type { Project, ProjectSession, SessionProvider } from '../../../../types/app';
 import AssistantThinkingIndicator from './AssistantThinkingIndicator';
@@ -49,6 +51,7 @@ interface ChatMessagesPaneProps {
   showThinking?: boolean;
   selectedProject: Project;
   isLoading: boolean;
+  intakeGreeting?: string | null;
 }
 
 export default function ChatMessagesPane({
@@ -89,6 +92,7 @@ export default function ChatMessagesPane({
   showThinking,
   selectedProject,
   isLoading,
+  intakeGreeting,
 }: ChatMessagesPaneProps) {
   const { t } = useTranslation('chat');
   const messageKeyMapRef = useRef<WeakMap<ChatMessage, string>>(new WeakMap());
@@ -140,19 +144,38 @@ export default function ChatMessagesPane({
           </div>
         </div>
       ) : chatMessages.length === 0 ? (
-        <ProviderSelectionEmptyState
-          selectedSession={selectedSession}
-          currentSessionId={currentSessionId}
-          provider={provider}
-          setProvider={setProvider}
-          textareaRef={textareaRef}
-          claudeModel={claudeModel}
-          setClaudeModel={setClaudeModel}
-          cursorModel={cursorModel}
-          setCursorModel={setCursorModel}
-          codexModel={codexModel}
-          setCodexModel={setCodexModel}
-        />
+        <>
+          <ProviderSelectionEmptyState
+            selectedSession={selectedSession}
+            currentSessionId={currentSessionId}
+            provider={provider}
+            setProvider={setProvider}
+            textareaRef={textareaRef}
+            claudeModel={claudeModel}
+            setClaudeModel={setClaudeModel}
+            cursorModel={cursorModel}
+            setCursorModel={setCursorModel}
+            codexModel={codexModel}
+            setCodexModel={setCodexModel}
+          />
+          {intakeGreeting && (
+            <div className="flex flex-col w-full mb-6 mt-4">
+              <div className="flex items-center space-x-2 mb-2">
+                <div className="w-6 h-6 rounded-full flex items-center justify-center text-white text-sm flex-shrink-0">
+                  <SessionProviderLogo provider={provider} className="w-full h-full" />
+                </div>
+                <div className="text-xs font-semibold text-gray-900 dark:text-white">
+                  {t('messageTypes.claude')}
+                </div>
+              </div>
+              <div className="w-full pl-0">
+                <Markdown className="prose prose-md max-w-none dark:prose-invert prose-gray text-[15.5px] leading-relaxed">
+                  {intakeGreeting}
+                </Markdown>
+              </div>
+            </div>
+          )}
+        </>
       ) : (
         <>
           {/* Loading indicator for older messages (hide when load-all is active) */}

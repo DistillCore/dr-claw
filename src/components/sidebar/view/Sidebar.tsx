@@ -153,7 +153,11 @@ function Sidebar({
       }
 
       if (data.project) {
-        handleProjectSelect(data.project as Project);
+        if (window.handleProjectCreatedWithIntake) {
+          window.handleProjectCreatedWithIntake(data.project as Project);
+        } else {
+          handleProjectSelect(data.project as Project);
+        }
       }
     } catch (err) {
       console.error('Error quick-creating project:', err);

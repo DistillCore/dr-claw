@@ -281,7 +281,7 @@ export function useChatRealtimeHandlers({
                 streamBufferRef.current = '';
                 streamTimerRef.current = null;
                 appendStreamingChunk(setChatMessages, chunk, false);
-              }, 100);
+              }, 30);
             }
             return;
           }
@@ -548,7 +548,7 @@ export function useChatRealtimeHandlers({
               streamBufferRef.current = '';
               streamTimerRef.current = null;
               appendStreamingChunk(setChatMessages, chunk, true);
-            }, 100);
+            }, 30);
           }
         }
         break;

@@ -48,7 +48,7 @@ export function useChatSessionState({
   resetStreamingState,
   pendingViewSessionRef,
 }: UseChatSessionStateArgs) {
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>(() => {
+  const [chatMessages, _setChatMessages] = useState<ChatMessage[]>(() => {
     if (typeof window !== 'undefined' && selectedProject) {
       const saved = safeLocalStorage.getItem(`chat_messages_${selectedProject.name}`);
       if (saved) {
@@ -64,6 +64,22 @@ export function useChatSessionState({
     }
     return [];
   });
+
+  const setChatMessages = useCallback((updater: React.SetStateAction<ChatMessage[]>) => {
+    _setChatMessages((prev) => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      let hasChanges = false;
+      const final = next.map((msg) => {
+        if (!msg.id && !msg.messageId && !msg.toolId && !msg.toolCallId && !msg.blobId && !msg.rowid && !msg.sequence) {
+          hasChanges = true;
+          return { ...msg, messageId: (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : Math.random().toString(36).substring(2, 15) };
+        }
+        return msg;
+      });
+      return hasChanges ? final : next;
+    });
+  }, []);
+
   const [isLoading, setIsLoading] = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(selectedSession?.id || null);
   const [sessionMessages, setSessionMessages] = useState<any[]>([]);

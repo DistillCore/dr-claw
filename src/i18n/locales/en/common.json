@@ -24,7 +24,8 @@
     "git": "Source Control",
     "tasks": "Tasks",
     "researchLab": "Research Lab",
-    "skills": "Skills"
+    "skills": "Skills",
+    "compute": "Compute"
   },
   "researchLabGuide": {
     "title": "How to Use VibeLab",

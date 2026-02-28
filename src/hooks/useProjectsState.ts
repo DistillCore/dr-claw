@@ -10,6 +10,12 @@ import type {
   ProjectsUpdatedMessage,
 } from '../types/app';
 
+declare global {
+  interface Window {
+    handleProjectCreatedWithIntake?: (project: Project) => void;
+  }
+}
+
 type UseProjectsStateArgs = {
   sessionId?: string;
   navigate: NavigateFunction;
@@ -119,6 +125,7 @@ export function useProjectsState({
   const [showSettings, setShowSettings] = useState(false);
   const [settingsInitialTab, setSettingsInitialTab] = useState('agents');
   const [externalMessageUpdate, setExternalMessageUpdate] = useState(0);
+  const [pendingAutoIntake, setPendingAutoIntake] = useState(false);
 
   const loadingProgressTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const projectsUpdateDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -399,6 +406,20 @@ export function useProjectsState({
     [isMobile, navigate],
   );
 
+  const handleProjectCreatedWithIntake = useCallback(
+    (project: Project) => {
+      setSelectedProject(project);
+      setSelectedSession(null);
+      setActiveTab('chat');
+      setPendingAutoIntake(true);
+      navigate('/');
+      if (isMobile) setSidebarOpen(false);
+    },
+    [isMobile, navigate],
+  );
+
+  const clearPendingAutoIntake = useCallback(() => setPendingAutoIntake(false), []);
+
   const handleSessionDelete = useCallback(
     (sessionIdToDelete: string) => {
       if (selectedSession?.id === sessionIdToDelete) {
@@ -541,5 +562,8 @@ export function useProjectsState({
     handleSessionDelete,
     handleProjectDelete,
     handleSidebarRefresh,
+    pendingAutoIntake,
+    handleProjectCreatedWithIntake,
+    clearPendingAutoIntake,
   };
 }

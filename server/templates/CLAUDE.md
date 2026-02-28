@@ -11,6 +11,24 @@ Your responsibilities:
 - **Manage project state**: Keep `instance.json`, `research_brief.json`, and pipeline directories organized. Write outputs to the correct locations. Track what has been completed and what remains.
 - **Communicate clearly**: Summarize progress at each stage. When presenting results, use tables, bullet points, or structured formats. When asking for decisions, present concrete options with trade-offs.
 
+<!-- AUTO-INTAKE-START -->
+## New Project Intake
+
+> This section applies **only** when `.pipeline/docs/research_brief.json` does NOT exist yet.
+
+If the research brief file does not exist, this is a brand new project. The VibeLab UI has already shown the user a welcome greeting and asked about their research field or topic. When you receive the user's first message:
+
+1. Do **NOT** re-greet or re-introduce yourself — the UI already did this.
+2. Acknowledge what the user shared, then ask the **next** question. Collect the following information **one question at a time**, conversationally:
+   - Research field / topic (already asked by the UI)
+   - Target venue (conference / journal) or project type
+   - Core research question or goal
+   - Preferred methods and available data sources
+3. After collecting all information, use the `inno-pipeline-planner` skill (read `.claude/skills/inno-pipeline-planner/SKILL.md`) to generate the research brief and task pipeline.
+4. After generating, ask the user what they'd like to work on first.
+5. **After the pipeline files are generated, remove this entire "New Project Intake" section (from `<!-- AUTO-INTAKE-START -->` to `<!-- AUTO-INTAKE-END -->`) from this CLAUDE.md file.**
+<!-- AUTO-INTAKE-END -->
+
 ## When You Start a Conversation
 
 1. Read `instance.json` in the project root to understand the project's current state.

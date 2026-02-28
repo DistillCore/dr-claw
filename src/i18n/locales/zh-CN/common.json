@@ -24,7 +24,8 @@
     "git": "源代码管理",
     "tasks": "任务",
     "researchLab": "研究实验室",
-    "skills": "技能"
+    "skills": "技能",
+    "compute": "计算节点"
   },
   "researchLabGuide": {
     "title": "如何使用 VibeLab",

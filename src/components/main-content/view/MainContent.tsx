@@ -6,6 +6,7 @@ import StandaloneShell from '../../StandaloneShell';
 import GitPanel from '../../GitPanel';
 import ResearchLab from '../../ResearchLab';
 import SkillsDashboard from '../../SkillsDashboard';
+import ComputePanel from '../../ComputePanel';
 import ErrorBoundary from '../../ErrorBoundary';
 
 import MainContentHeader from './subcomponents/MainContentHeader';
@@ -47,6 +48,8 @@ function MainContent({
   onNavigateToSession,
   onShowSettings,
   externalMessageUpdate,
+  pendingAutoIntake,
+  clearPendingAutoIntake,
 }: MainContentProps) {
   const { preferences } = useUiPreferences();
   const { autoExpandTools, showRawParameters, showThinking, autoScrollToBottom, sendByCtrlEnter } = preferences;
@@ -127,6 +130,8 @@ function MainContent({
                 sendByCtrlEnter={sendByCtrlEnter}
                 externalMessageUpdate={externalMessageUpdate}
                 onShowAllTasks={() => setActiveTab('researchlab')}
+                pendingAutoIntake={pendingAutoIntake}
+                clearPendingAutoIntake={clearPendingAutoIntake}
               />
             </ErrorBoundary>
           </div>
@@ -161,6 +166,12 @@ function MainContent({
           {activeTab === 'skills' && (
             <div className="h-full overflow-hidden">
               <SkillsDashboard />
+            </div>
+          )}
+
+          {activeTab === 'compute' && (
+            <div className="h-full overflow-hidden">
+              <ComputePanel selectedProject={selectedProject} />
             </div>
           )}
 

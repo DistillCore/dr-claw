@@ -241,4 +241,28 @@ export const api = {
 
   // Generic GET method for any endpoint
   get: (endpoint) => authenticatedFetch(`/api${endpoint}`),
+
+  // Compute node management
+  compute: {
+    getNodes: () => authenticatedFetch('/api/compute/nodes'),
+    addNode: (node) => authenticatedFetch('/api/compute/nodes', { method: 'POST', body: JSON.stringify(node) }),
+    updateNode: (id, node) => authenticatedFetch(`/api/compute/nodes/${id}`, { method: 'PUT', body: JSON.stringify(node) }),
+    deleteNode: (id) => authenticatedFetch(`/api/compute/nodes/${id}`, { method: 'DELETE' }),
+    setActive: (id) => authenticatedFetch(`/api/compute/nodes/${id}/active`, { method: 'POST' }),
+    testNode: (id) => authenticatedFetch(`/api/compute/nodes/${id}/test`, { method: 'POST' }),
+    syncNode: (id, direction, cwd) => authenticatedFetch(`/api/compute/nodes/${id}/sync`, { method: 'POST', body: JSON.stringify({ direction, cwd }) }),
+    runOnNode: (id, command, cwd, skipSync) => authenticatedFetch(`/api/compute/nodes/${id}/run`, { method: 'POST', body: JSON.stringify({ command, cwd, skipSync }) }),
+    slurmInfo: (id) => authenticatedFetch(`/api/compute/nodes/${id}/slurm/info`),
+    slurmQueue: (id) => authenticatedFetch(`/api/compute/nodes/${id}/slurm/queue`),
+    slurmSalloc: (id, opts) => authenticatedFetch(`/api/compute/nodes/${id}/slurm/salloc`, { method: 'POST', body: JSON.stringify(opts) }),
+    slurmSbatch: (id, opts) => authenticatedFetch(`/api/compute/nodes/${id}/slurm/sbatch`, { method: 'POST', body: JSON.stringify(opts) }),
+    slurmCancel: (id, jobId) => authenticatedFetch(`/api/compute/nodes/${id}/slurm/cancel/${jobId}`, { method: 'POST' }),
+    // Backward-compatible
+    getConfig: () => authenticatedFetch('/api/compute/config'),
+    configure: (config) => authenticatedFetch('/api/compute/configure', { method: 'POST', body: JSON.stringify(config) }),
+    test: () => authenticatedFetch('/api/compute/test', { method: 'POST' }),
+    sync: (direction, cwd) => authenticatedFetch('/api/compute/sync', { method: 'POST', body: JSON.stringify({ direction, cwd }) }),
+    run: (command, cwd, skipSync) => authenticatedFetch('/api/compute/run', { method: 'POST', body: JSON.stringify({ command, cwd, skipSync }) }),
+    status: () => authenticatedFetch('/api/compute/status'),
+  },
 };

@@ -15,6 +15,8 @@ import { useChatRealtimeHandlers } from '../hooks/useChatRealtimeHandlers';
 import { useChatComposerState } from '../hooks/useChatComposerState';
 import type { Provider } from '../types/types';
 
+const INTAKE_GREETING = `Hello! I'm your VibeLab research assistant, here to help you set up your research pipeline.\n\nTo get started, could you tell me about your research field or topic?`;
+
 type PendingViewSession = {
   sessionId: string | null;
   startedAt: number;
@@ -43,6 +45,8 @@ function ChatInterface({
   sendByCtrlEnter,
   externalMessageUpdate,
   onShowAllTasks,
+  pendingAutoIntake,
+  clearPendingAutoIntake,
 }: ChatInterfaceProps) {
   const { tasksEnabled, isTaskMasterInstalled } = useTasksSettings();
   const { refreshTasks } = useTaskMaster();
@@ -169,6 +173,8 @@ function ChatInterface({
     handleGrantToolPermission,
     handleInputFocusChange,
     isInputFocused,
+    intakeGreeting,
+    setIntakeGreeting,
   } = useChatComposerState({
     selectedProject,
     selectedSession,
@@ -222,6 +228,31 @@ function ChatInterface({
     onReplaceTemporarySession,
     onNavigateToSession,
   });
+
+  const autoIntakeTriggeredRef = useRef(false);
+
+  useEffect(() => {
+    if (
+      !pendingAutoIntake ||
+      autoIntakeTriggeredRef.current ||
+      !selectedProject ||
+      selectedSession ||
+      isLoading ||
+      chatMessages.length > 0
+    ) return;
+
+    const intakeKey = `intake_triggered_${selectedProject.name}`;
+    if (sessionStorage.getItem(intakeKey)) {
+      clearPendingAutoIntake?.();
+      return;
+    }
+
+    autoIntakeTriggeredRef.current = true;
+    sessionStorage.setItem(intakeKey, 'true');
+    clearPendingAutoIntake?.();
+
+    setIntakeGreeting(INTAKE_GREETING);
+  }, [pendingAutoIntake, selectedProject, selectedSession, isLoading, chatMessages.length, clearPendingAutoIntake, setIntakeGreeting]);
 
   useEffect(() => {
     if (!isLoading || !canAbortSession) {
@@ -312,6 +343,7 @@ function ChatInterface({
           isLoadingSessionMessages={isLoadingSessionMessages}
           chatMessages={chatMessages}
           selectedSession={selectedSession}
+          intakeGreeting={intakeGreeting}
           currentSessionId={currentSessionId}
           provider={provider}
           setProvider={(nextProvider) => setProvider(nextProvider as Provider)}

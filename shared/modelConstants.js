@@ -17,10 +17,11 @@ export const CLAUDE_MODELS = {
     { value: 'opus', label: 'Opus' },
     { value: 'haiku', label: 'Haiku' },
     { value: 'opusplan', label: 'Opus Plan' },
-    { value: 'sonnet[1m]', label: 'Sonnet [1M]' }
+    { value: 'sonnet[1m]', label: 'Sonnet [1M]' },
+    { value: 'claude-opus-4-6', label: 'Opus 4.6' }
   ],
 
-  DEFAULT: 'sonnet'
+  DEFAULT: process.env.ANTHROPIC_MODEL || 'sonnet'
 };
 
 /**

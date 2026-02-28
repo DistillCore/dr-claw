@@ -3,6 +3,7 @@ import { spawn } from 'child_process';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
+import fetch from 'node-fetch';
 import { resolveCursorCliCommand } from '../utils/cursorCommand.js';
 
 const router = express.Router();
@@ -16,6 +17,15 @@ router.get('/claude/status', async (req, res) => {
         authenticated: true,
         email: credentialsResult.email || 'Authenticated',
         method: 'cli'
+      });
+    }
+
+    // Check for Custom API env var
+    if (process.env.ANTHROPIC_AUTH_TOKEN) {
+      return res.json({
+        authenticated: true,
+        email: 'Custom API Connected',
+        method: 'custom_api'
       });
     }
 
@@ -330,5 +340,73 @@ async function checkCodexCredentials() {
     };
   }
 }
+
+router.post('/claude/verify-custom-api', async (req, res) => {
+  try {
+    const { baseUrl, token } = req.body;
+    if (!token) return res.status(400).json({ error: 'Token is required' });
+
+    const verifyUrl = `${baseUrl || 'https://api.anthropic.com'}/v1/messages`;
+    const response = await fetch(verifyUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': token,
+        'anthropic-version': '2023-06-01'
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1,
+        messages: [{ role: 'user', content: 'hi' }]
+      })
+    });
+
+    // 200 = success, 401/403 = bad token, anything else with a valid JSON body means the endpoint is reachable
+    if (response.ok || (response.status >= 400 && response.status < 500 && response.status !== 401 && response.status !== 403)) {
+      const envPath = path.join(process.cwd(), '.env');
+      let envContent = '';
+      try {
+        envContent = await fs.readFile(envPath, 'utf8');
+      } catch (e) { /* ignore if not exists */ }
+
+      const keysToUpdate = {
+        'ANTHROPIC_BASE_URL': baseUrl || 'https://api.anthropic.com',
+        'ANTHROPIC_AUTH_TOKEN': token,
+        'CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS': '1'
+      };
+
+      const newLines = [];
+      const existingKeys = new Set();
+      envContent.split('\n').forEach(line => {
+        const [key] = line.split('=');
+        if (keysToUpdate[key.trim()]) {
+          newLines.push(`${key.trim()}=${keysToUpdate[key.trim()]}`);
+          existingKeys.add(key.trim());
+        } else if (line.trim()) {
+          newLines.push(line);
+        }
+      });
+
+      Object.entries(keysToUpdate).forEach(([key, val]) => {
+        if (!existingKeys.has(key)) {
+          newLines.push(`${key}=${val}`);
+        }
+      });
+
+      await fs.writeFile(envPath, newLines.join('\n') + '\n');
+
+      Object.entries(keysToUpdate).forEach(([key, val]) => {
+        process.env[key] = val;
+      });
+
+      return res.json({ success: true, message: 'Custom API verified and applied.' });
+    } else {
+      const err = await response.text();
+      return res.status(response.status).json({ error: `Verification failed: ${err}` });
+    }
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
 export default router;

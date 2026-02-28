@@ -67,6 +67,8 @@ export interface MainContentProps {
   onNavigateToSession: (targetSessionId: string) => void;
   onShowSettings: () => void;
   externalMessageUpdate: number;
+  pendingAutoIntake?: boolean;
+  clearPendingAutoIntake?: () => void;
 }
 
 export interface MainContentHeaderProps {

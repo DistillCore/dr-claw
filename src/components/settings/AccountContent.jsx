@@ -1,8 +1,11 @@
+import { useState } from 'react';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
-import { LogIn } from 'lucide-react';
+import { Input } from '../ui/input';
+import { LogIn, Server, Key } from 'lucide-react';
 import SessionProviderLogo from '../SessionProviderLogo';
 import { useTranslation } from 'react-i18next';
+import { authenticatedFetch } from '../../utils/api';
 
 const agentConfig = {
   claude: {
@@ -37,6 +40,35 @@ const agentConfig = {
 export default function AccountContent({ agent, authStatus, onLogin }) {
   const { t } = useTranslation('settings');
   const config = agentConfig[agent];
+
+  const [customApiUrl, setCustomApiUrl] = useState('');
+  const [customApiToken, setCustomApiToken] = useState('');
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [verifyResult, setVerifyResult] = useState(null);
+
+  const handleVerifyCustomApi = async () => {
+    setIsVerifying(true);
+    setVerifyResult(null);
+    try {
+      const res = await authenticatedFetch('/api/cli/claude/verify-custom-api', {
+        method: 'POST',
+        body: JSON.stringify({
+          baseUrl: customApiUrl.trim() || undefined,
+          token: customApiToken.trim(),
+        }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setVerifyResult({ success: true, message: data.message || 'Custom API verified and applied.' });
+      } else {
+        setVerifyResult({ success: false, message: data.error || 'Verification failed' });
+      }
+    } catch (err) {
+      setVerifyResult({ success: false, message: err.message });
+    } finally {
+      setIsVerifying(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -105,6 +137,50 @@ export default function AccountContent({ agent, authStatus, onLogin }) {
               </Button>
             </div>
           </div>
+
+          {agent === 'claude' && (
+            <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
+              <div className="flex items-center gap-2 mb-3">
+                <Server className="w-4 h-4 text-gray-500" />
+                <div className="font-medium text-gray-900 dark:text-gray-100">Custom API Config</div>
+              </div>
+              <div className="space-y-3">
+                <div>
+                  <label className="text-sm text-gray-600 dark:text-gray-400 block mb-1">API Base URL</label>
+                  <Input
+                    placeholder="https://api.anthropic.com (default)"
+                    value={customApiUrl}
+                    onChange={e => setCustomApiUrl(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="text-sm text-gray-600 dark:text-gray-400 block mb-1 flex items-center gap-1">
+                    <Key className="w-3.5 h-3.5" /> API Token
+                  </label>
+                  <Input
+                    type="password"
+                    placeholder="sk-ant-..."
+                    value={customApiToken}
+                    onChange={e => setCustomApiToken(e.target.value)}
+                  />
+                </div>
+                <Button
+                  onClick={handleVerifyCustomApi}
+                  disabled={isVerifying || !customApiToken.trim()}
+                  size="sm"
+                  variant="outline"
+                  className="w-full"
+                >
+                  {isVerifying ? 'Verifying...' : 'Verify & Save'}
+                </Button>
+                {verifyResult && (
+                  <div className={`text-sm ${verifyResult.success ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                    {verifyResult.message}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           {authStatus?.error && (
             <div className="border-t border-gray-200 dark:border-gray-700 pt-4">

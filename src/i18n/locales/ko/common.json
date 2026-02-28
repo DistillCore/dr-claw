@@ -24,7 +24,8 @@
     "git": "소스 관리",
     "tasks": "작업",
     "researchLab": "Research Lab",
-    "skills": "Skills"
+    "skills": "Skills",
+    "compute": "컴퓨팅"
   },
   "researchLabGuide": {
     "title": "VibeLab 사용 방법",

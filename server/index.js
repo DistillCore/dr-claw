@@ -63,6 +63,7 @@ import userRoutes from './routes/user.js';
 import codexRoutes from './routes/codex.js';
 import skillsRoutes from './routes/skills.js';
 import telemetryRoutes from './routes/telemetry.js';
+import computeRoutes from './routes/compute.js';
 import { initializeDatabase } from './database/db.js';
 import { validateApiKey, authenticateToken, authenticateWebSocket } from './middleware/auth.js';
 import { IS_PLATFORM } from './constants/config.js';
@@ -411,6 +412,9 @@ app.use('/api/skills', authenticateToken, skillsRoutes);
 
 // Telemetry API Routes (protected)
 app.use('/api/telemetry', authenticateToken, telemetryRoutes);
+
+// Compute API Routes (protected)
+app.use('/api/compute', authenticateToken, computeRoutes);
 
 // Agent API Routes (uses API key authentication)
 app.use('/api/agent', agentRoutes);
@@ -959,6 +963,9 @@ wss.on('connection', (ws, request) => {
         handleShellConnection(ws);
     } else if (pathname === '/ws') {
         handleChatConnection(ws, request);
+    } else if (pathname === '/compute-shell') {
+        const nodeId = urlObj.searchParams.get('nodeId') || null;
+        handleComputeShellConnection(ws, nodeId);
     } else {
         console.log('[WARN] Unknown WebSocket path:', pathname);
         ws.close();
@@ -1678,6 +1685,220 @@ function handleShellConnection(ws) {
         console.error('[ERROR] Shell WebSocket error:', error);
     });
 }
+
+function handleComputeShellConnection(ws, urlNodeId) {
+    console.log('🖥️  Compute shell client connected');
+    let shellProcess = null;
+    let ptySessionKey = null;
+
+    const getComputeNodeConfig = async (nodeId) => {
+        const { loadNodeConfig, getActiveNode } = await import('./compute-node.js');
+        const effectiveNodeId = nodeId || urlNodeId;
+        if (effectiveNodeId) {
+            return await loadNodeConfig(effectiveNodeId);
+        }
+        return await getActiveNode();
+    };
+
+    ws.on('message', async (message) => {
+        try {
+            const data = JSON.parse(message);
+            console.log('📨 Compute shell message received:', data.type);
+
+            if (data.type === 'init') {
+                const requestedNodeId = data.nodeId;
+                let config;
+                try {
+                    config = await getComputeNodeConfig(requestedNodeId);
+                } catch (e) {
+                    ws.send(JSON.stringify({
+                        type: 'output',
+                        data: '\x1b[31mCompute node not configured. Please save configuration first.\x1b[0m\r\n'
+                    }));
+                    return;
+                }
+
+                if (!config || !config.host || !config.user) {
+                    ws.send(JSON.stringify({
+                        type: 'output',
+                        data: '\x1b[31mCompute node configuration incomplete (missing host/user).\x1b[0m\r\n'
+                    }));
+                    return;
+                }
+
+                const termCols = data.cols || 80;
+                const termRows = data.rows || 24;
+
+                ptySessionKey = `compute_${config.id || 'default'}_${config.host}_${config.user}`;
+
+                const existingSession = ptySessionsMap.get(ptySessionKey);
+                if (existingSession) {
+                    console.log('♻️  Reconnecting to existing compute PTY session:', ptySessionKey);
+                    shellProcess = existingSession.pty;
+                    clearTimeout(existingSession.timeoutId);
+
+                    ws.send(JSON.stringify({
+                        type: 'output',
+                        data: '\x1b[36m[Reconnected to compute node]\x1b[0m\r\n'
+                    }));
+
+                    if (existingSession.buffer && existingSession.buffer.length > 0) {
+                        existingSession.buffer.forEach(bufferedData => {
+                            ws.send(JSON.stringify({ type: 'output', data: bufferedData }));
+                        });
+                    }
+
+                    existingSession.ws = ws;
+                    return;
+                }
+
+                const spawnCmd = 'ssh';
+                const sshArgs = ['-o', 'StrictHostKeyChecking=no', '-tt'];
+
+                if (config.keyPath) {
+                    sshArgs.push('-i', config.keyPath);
+                }
+
+                sshArgs.push(`${config.user}@${config.host}`);
+
+                if (config.workDir && config.workDir !== '~') {
+                    sshArgs.push(`cd ${config.workDir} && exec $SHELL -l`);
+                }
+
+                const usePasswordAuth = config.password && !config.keyPath;
+
+                ws.send(JSON.stringify({
+                    type: 'output',
+                    data: `\x1b[36mConnecting to ${config.user}@${config.host}${config.workDir && config.workDir !== '~' ? ` (workDir: ${config.workDir})` : ''}...\x1b[0m\r\n`
+                }));
+
+                try {
+                    shellProcess = pty.spawn(spawnCmd, sshArgs, {
+                        name: 'xterm-256color',
+                        cols: termCols,
+                        rows: termRows,
+                        cwd: os.homedir(),
+                        env: {
+                            ...process.env,
+                            TERM: 'xterm-256color',
+                            COLORTERM: 'truecolor',
+                            FORCE_COLOR: '3'
+                        }
+                    });
+
+                    console.log('🟢 Compute shell process started, PID:', shellProcess.pid);
+
+                    let passwordAutoFilled = false;
+                    let earlyOutput = '';
+
+                    ptySessionsMap.set(ptySessionKey, {
+                        pty: shellProcess,
+                        ws: ws,
+                        buffer: [],
+                        timeoutId: null,
+                        host: config.host
+                    });
+
+                    shellProcess.onData((outputData) => {
+                        const session = ptySessionsMap.get(ptySessionKey);
+                        if (!session) return;
+
+                        if (usePasswordAuth && !passwordAutoFilled) {
+                            earlyOutput += outputData;
+                            const cleanText = earlyOutput.replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, '');
+                            if (/[Pp]assword[:\s]*$/.test(cleanText)) {
+                                passwordAutoFilled = true;
+                                shellProcess.write(config.password + '\n');
+                                return;
+                            }
+                        }
+
+                        if (session.buffer.length < 5000) {
+                            session.buffer.push(outputData);
+                        } else {
+                            session.buffer.shift();
+                            session.buffer.push(outputData);
+                        }
+
+                        if (session.ws && session.ws.readyState === WebSocket.OPEN) {
+                            session.ws.send(JSON.stringify({
+                                type: 'output',
+                                data: outputData
+                            }));
+                        }
+                    });
+
+                    shellProcess.onExit((exitCode) => {
+                        console.log('🔚 Compute shell exited with code:', exitCode.exitCode);
+                        const session = ptySessionsMap.get(ptySessionKey);
+                        if (session && session.ws && session.ws.readyState === WebSocket.OPEN) {
+                            session.ws.send(JSON.stringify({
+                                type: 'output',
+                                data: `\r\n\x1b[33mSSH session ended (code ${exitCode.exitCode})\x1b[0m\r\n`
+                            }));
+                        }
+                        if (session && session.timeoutId) {
+                            clearTimeout(session.timeoutId);
+                        }
+                        ptySessionsMap.delete(ptySessionKey);
+                        shellProcess = null;
+                    });
+
+                } catch (spawnError) {
+                    console.error('[ERROR] Error spawning SSH process:', spawnError);
+                    ws.send(JSON.stringify({
+                        type: 'output',
+                        data: `\r\n\x1b[31mError: ${spawnError.message}\x1b[0m\r\n`
+                    }));
+                }
+
+            } else if (data.type === 'input') {
+                if (shellProcess && shellProcess.write) {
+                    try {
+                        shellProcess.write(data.data);
+                    } catch (error) {
+                        console.error('Error writing to compute shell:', error);
+                    }
+                }
+            } else if (data.type === 'resize') {
+                if (shellProcess && shellProcess.resize) {
+                    shellProcess.resize(data.cols, data.rows);
+                }
+            }
+        } catch (error) {
+            console.error('[ERROR] Compute shell WebSocket error:', error.message);
+            if (ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                    type: 'output',
+                    data: `\r\n\x1b[31mError: ${error.message}\x1b[0m\r\n`
+                }));
+            }
+        }
+    });
+
+    ws.on('close', () => {
+        console.log('🔌 Compute shell client disconnected');
+        if (ptySessionKey) {
+            const session = ptySessionsMap.get(ptySessionKey);
+            if (session) {
+                console.log('⏳ Compute PTY session kept alive for 30 minutes:', ptySessionKey);
+                session.ws = null;
+                session.timeoutId = setTimeout(() => {
+                    console.log('⏰ Compute PTY session timeout, killing:', ptySessionKey);
+                    if (session.pty && session.pty.kill) {
+                        session.pty.kill();
+                    }
+                    ptySessionsMap.delete(ptySessionKey);
+                }, PTY_SESSION_TIMEOUT);
+            }
+        }
+    });
+
+    ws.on('error', (error) => {
+        console.error('[ERROR] Compute shell WebSocket error:', error);
+    });
+}
+
 // Audio transcription endpoint
 app.post('/api/transcribe', authenticateToken, async (req, res) => {
     try {
