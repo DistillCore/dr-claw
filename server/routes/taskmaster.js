@@ -23,16 +23,18 @@ const LEGACY_TASKMASTER_DIR = '.taskmaster';
 const DEFAULT_TASKS_TAG = 'master';
 const DEFAULT_RESEARCH_BRIEF_FILENAME = 'research_brief.json';
 const DEFAULT_MAX_TASKS = 30;
-const STAGE_ORDER = ['ideation', 'experiment', 'publication'];
+const STAGE_ORDER = ['ideation', 'experiment', 'publication', 'presentation'];
 const STAGE_LABELS = {
     ideation: 'Ideation',
     experiment: 'Experiment',
     publication: 'Publication',
+    presentation: 'Presentation',
 };
 const STAGE_PROMPT_HINTS = {
     ideation: 'Clarify thesis, scope boundaries, and evidence framing before execution.',
     experiment: 'Turn assumptions into an executable protocol with measurable validation criteria.',
     publication: 'Convert outcomes into a coherent manuscript narrative with concrete submission artifacts.',
+    presentation: 'Transform research outcomes into visual slides, narration scripts, and demo videos.',
 };
 const DEFAULT_STAGE_SKILL_MAP = {
     ideation: {
@@ -57,6 +59,14 @@ const DEFAULT_STAGE_SKILL_MAP = {
             analysis: ['inno-reference-audit'],
         },
     },
+    presentation: {
+        base: ['making-academic-presentations'],
+        byTaskType: {
+            scripting: ['making-academic-presentations'],
+            rendering: ['making-academic-presentations'],
+            narration: ['making-academic-presentations'],
+        },
+    },
 };
 const DEFAULT_BRIEF_SECTIONS = {
     ideation: {
@@ -76,6 +86,12 @@ const DEFAULT_BRIEF_SECTIONS = {
         figures_tables_plan: '',
         artifact_plan: '',
         submission_checklist: [],
+    },
+    presentation: {
+        slide_outline: '',
+        deck_style: '',
+        tts_config: '',
+        video_assembly_plan: '',
     },
 };
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -221,6 +237,41 @@ function buildDefaultBriefPipeline(stageSkillMap) {
                     },
                 ],
                 recommended_skills: map.publication.base,
+            },
+            presentation: {
+                required_elements: [
+                    'sections.presentation.slide_outline',
+                ],
+                optional_elements: [
+                    'sections.presentation.deck_style',
+                    'sections.presentation.tts_config',
+                    'sections.presentation.video_assembly_plan',
+                ],
+                quality_gate: [
+                    'Slide outline covers key paper contributions',
+                    'Deck style defined for visual consistency',
+                ],
+                task_blueprints: [
+                    {
+                        id: 'presentation_draft_outline',
+                        title: 'Draft slide outline and narration scripts',
+                        description: 'Create per-slide content plan with talking points based on paper contributions.',
+                        taskType: 'scripting',
+                    },
+                    {
+                        id: 'presentation_generate_slides',
+                        title: 'Generate slide images from outline and paper figures',
+                        description: 'Use nanobanana to render slide images, preferring /edit on existing HQ paper figures.',
+                        taskType: 'rendering',
+                    },
+                    {
+                        id: 'presentation_generate_narration',
+                        title: 'Generate TTS audio for slide narration',
+                        description: 'Generate one audio file per slide using edge-tts (default), Kokoro (offline), or ElevenLabs (premium).',
+                        taskType: 'narration',
+                    },
+                ],
+                recommended_skills: map.presentation?.base || ['making-academic-presentations'],
             },
         },
     };
@@ -466,12 +517,13 @@ function inferStageFromCandidate(text = '') {
     if (value.includes('ideation')) return 'ideation';
     if (value.includes('experiment') || value.includes('validation') || value.includes('baseline')) return 'experiment';
     if (value.includes('publication') || value.includes('paper') || value.includes('submission')) return 'publication';
+    if (value.includes('presentation') || value.includes('slide') || value.includes('deck') || value.includes('demo video')) return 'presentation';
     return null;
 }
 
 function normalizeStageName(stage) {
     const value = String(stage || '').trim().toLowerCase();
-    if (value === 'ideation' || value === 'experiment' || value === 'publication') {
+    if (value === 'ideation' || value === 'experiment' || value === 'publication' || value === 'presentation') {
         return value;
     }
     return null;
