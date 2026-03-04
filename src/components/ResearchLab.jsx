@@ -363,6 +363,12 @@ function TaskPipelineBoard({ tasks, isLoading, onNavigateToChat, projectName, on
   const [editForm, setEditForm] = useState({ title: '', description: '' });
   const [saving, setSaving] = useState(false);
 
+  // Clear editing state when project changes
+  useEffect(() => {
+    setEditingTaskId(null);
+    setEditForm({ title: '', description: '' });
+  }, [projectName]);
+
   const handleDoubleClick = useCallback((task) => {
     setEditingTaskId(String(task.id));
     setEditForm({ title: task.title || '', description: task.description || '' });
