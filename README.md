@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="public/drclaw" alt="VibeLab" width="96" height="96">
+  <img src="public/drclaw.jpg" alt="VibeLab" width="96" height="96">
   <h1>VibeLab: Your AI Research Assistant</h1>
   <p><strong>Plan, run, and write research in one workspace.</strong></p>
 </div>
