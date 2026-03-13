@@ -458,16 +458,30 @@ async function getProjects(userId, progressCallback = null) {
 
       // LOGIC FOR VISIBILITY:
       // A. If it's already in DB and belongs to THIS user -> Visible
-      // B. If it's NOT in DB at all -> Visible (will be claimed)
-      // C. If it's in DB but belongs to someone else -> HIDDEN
+      // B. If it's NOT in DB but is within the VibeLab workspace root -> Visible & Auto-claim
+      // C. If it's NOT in DB and OUTSIDE the root -> IGNORE (avoid cluttering with external Claude projects)
+      // D. If it's in DB but belongs to someone else -> HIDDEN
 
       if (dbEntry) {
         if (dbEntry.user_id === userId) {
-          discoveredDirectories.push({ entry, actualProjectDir: actualDir, dbEntry });
+          const normalizedActual = await normalizeComparablePath(actualDir);
+          const normalizedRoot = await normalizeComparablePath(workspacesRoot);
+
+          if (normalizedActual.startsWith(normalizedRoot)) {
+            discoveredDirectories.push({ entry, actualProjectDir: actualDir, dbEntry });
+          } else {
+            console.log(`[projects] Skipping external claimed project: ${entry.name} at ${actualDir}`);
+          }
         }
       } else {
-        // Unclaimed project discovered in filesystem -> Claim it for current user
-        discoveredDirectories.push({ entry, actualProjectDir: actualDir, dbEntry: null });
+        const normalizedActual = await normalizeComparablePath(actualDir);
+        const normalizedRoot = await normalizeComparablePath(workspacesRoot);
+
+        if (normalizedActual.startsWith(normalizedRoot)) {
+          discoveredDirectories.push({ entry, actualProjectDir: actualDir, dbEntry: null });
+        } else {
+          console.log(`[projects] Skipping external Claude project: ${entry.name} at ${actualDir}`);
+        }
       }
       existingProjects.add(entry.name);
     }
@@ -478,6 +492,15 @@ async function getProjects(userId, progressCallback = null) {
 
       const dbEntry = globalProjectMap.get(projectName);
       if (!dbEntry || !dbEntry.user_id) {
+        // Skip projects outside the workspace root
+        const normalizedConfigPath = await normalizeComparablePath(projectConfig.originalPath);
+        const normalizedRoot = await normalizeComparablePath(workspacesRoot);
+
+        if (!normalizedConfigPath.startsWith(normalizedRoot)) {
+          console.log(`[projects] Skipping external Claude config project: ${projectName} at ${projectConfig.originalPath}`);
+          continue;
+        }
+
         // This project exists in config but not assigned in DB yet
         // Only add if not already added from filesystem scan
         if (!discoveredDirectories.some(d => d.entry.name === projectName)) {
@@ -497,6 +520,15 @@ async function getProjects(userId, progressCallback = null) {
       const isVisible = !userId || dbEntry.user_id === userId;
 
       if (isVisible) {
+        // Also filter DB projects by workspace root
+        const normalizedDbPath = await normalizeComparablePath(dbEntry.path);
+        const normalizedRoot = await normalizeComparablePath(workspacesRoot);
+
+        if (!normalizedDbPath.startsWith(normalizedRoot)) {
+          console.log(`[projects] Skipping external DB project: ${dbEntry.id} at ${dbEntry.path}`);
+          continue;
+        }
+
         if (!discoveredDirectories.some(d => d.entry.name === dbEntry.id)) {
           discoveredDirectories.push({
             entry: { name: dbEntry.id },
