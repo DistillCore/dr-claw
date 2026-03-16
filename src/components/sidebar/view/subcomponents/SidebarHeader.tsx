@@ -44,7 +44,7 @@ export default function SidebarHeader({
 }: SidebarHeaderProps) {
   const LogoBlock = () => (
     <div className="flex items-center gap-2.5 min-w-0">
-      <img src="/logo.svg" alt="Vibe Lab" className="w-7 h-7 rounded-lg shadow-sm flex-shrink-0" />
+      <img src="/icons/file.svg" alt="Dr. Claw" className="w-7 h-7 rounded-lg shadow-sm flex-shrink-0" />
       <h1 className="text-[15px] font-bold text-foreground tracking-tight truncate">{t('app.title')}</h1>
     </div>
   );
@@ -59,7 +59,7 @@ export default function SidebarHeader({
         <div className="flex items-center justify-between gap-2">
           {IS_PLATFORM ? (
             <a
-              href="https://github.com/OpenLAIR/VibeLab"
+              href="https://github.com/OpenLAIR/dr-claw"
               className="flex items-center gap-2.5 min-w-0 hover:opacity-80 transition-opacity"
               title={t('tooltips.viewEnvironments')}
             >
@@ -173,7 +173,7 @@ export default function SidebarHeader({
         <div className="flex items-center justify-between">
           {IS_PLATFORM ? (
             <a
-              href="https://github.com/OpenLAIR/VibeLab"
+              href="https://github.com/OpenLAIR/dr-claw"
               className="flex items-center gap-2.5 active:opacity-70 transition-opacity min-w-0"
               title={t('tooltips.viewEnvironments')}
             >

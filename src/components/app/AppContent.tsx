@@ -130,10 +130,11 @@ export default function AppContent() {
   const SIDEBAR_MAX = 480;
   const SIDEBAR_DEFAULT = 288; // w-72
   const SIDEBAR_COLLAPSED_WIDTH = 48; // matches SidebarCollapsed w-12
-  const STORAGE_KEY = 'vibelab-sidebar-width';
+  const STORAGE_KEY = 'dr-claw-sidebar-width';
+  const LEGACY_STORAGE_KEY = 'vibelab-sidebar-width';
 
   const [sidebarWidth, setSidebarWidth] = useState(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
+    const saved = localStorage.getItem(STORAGE_KEY) ?? localStorage.getItem(LEGACY_STORAGE_KEY);
     const parsed = saved ? Number(saved) : NaN;
     return Number.isFinite(parsed) && parsed >= SIDEBAR_MIN && parsed <= SIDEBAR_MAX
       ? parsed
@@ -163,6 +164,7 @@ export default function AppContent() {
       document.removeEventListener('mouseup', onMouseUp);
       setSidebarWidth((w) => {
         localStorage.setItem(STORAGE_KEY, String(w));
+        localStorage.removeItem(LEGACY_STORAGE_KEY);
         return w;
       });
     };

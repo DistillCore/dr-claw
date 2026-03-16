@@ -23,7 +23,7 @@ function CredentialsSettings() {
   const [newlyCreatedKey, setNewlyCreatedKey] = useState(null);
 
   // Version check hook
-  const { updateAvailable, latestVersion, releaseInfo } = useVersionCheck('OpenLAIR', 'VibeLab');
+  const { updateAvailable, latestVersion, releaseInfo } = useVersionCheck('OpenLAIR', 'dr-claw');
 
   useEffect(() => {
     fetchData();
@@ -394,7 +394,7 @@ function CredentialsSettings() {
       <div className="pt-6 border-t border-border/50">
         <div className="flex items-center justify-between text-xs italic text-muted-foreground/60">
           <a
-            href={releaseInfo?.htmlUrl || 'https://github.com/OpenLAIR/VibeLab/releases'}
+            href={releaseInfo?.htmlUrl || 'https://github.com/OpenLAIR/dr-claw/releases'}
             target="_blank"
             rel="noopener noreferrer"
             className="hover:text-muted-foreground transition-colors"
@@ -403,7 +403,7 @@ function CredentialsSettings() {
           </a>
           {updateAvailable && latestVersion && (
             <a
-              href={releaseInfo?.htmlUrl || 'https://github.com/OpenLAIR/VibeLab/releases'}
+              href={releaseInfo?.htmlUrl || 'https://github.com/OpenLAIR/dr-claw/releases'}
               target="_blank"
               rel="noopener noreferrer"
               className="flex items-center gap-1.5 px-2 py-0.5 bg-green-500/10 text-green-600 dark:text-green-400 rounded-full hover:bg-green-500/20 transition-colors not-italic font-medium"
