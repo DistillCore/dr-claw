@@ -391,6 +391,17 @@ export function useChatRealtimeHandlers({
       setClaudeStatus(null);
     };
 
+    const flushAndFinalizePendingStream = () => {
+      if (streamTimerRef.current) {
+        clearTimeout(streamTimerRef.current);
+        streamTimerRef.current = null;
+      }
+      const chunk = streamBufferRef.current;
+      streamBufferRef.current = '';
+      appendStreamingChunk(setChatMessages, chunk, false);
+      finalizeStreamingMessage(setChatMessages);
+    };
+
     const markSessionsAsCompleted = (...sessionIds: Array<string | null | undefined>) => {
       const normalizedSessionIds = sessionIds.filter((id): id is string => typeof id === 'string' && id.length > 0);
       normalizedSessionIds.forEach((sessionId) => {
@@ -589,6 +600,16 @@ export function useChatRealtimeHandlers({
         if (isLegacyTaskMasterInstallError(latestMessage.error)) {
           break;
         }
+        const erroredSessionId =
+          latestMessage.sessionId ||
+          pendingViewSessionRef.current?.sessionId ||
+          currentSessionId ||
+          selectedSession?.id ||
+          null;
+        flushAndFinalizePendingStream();
+        clearLoadingIndicators();
+        markSessionsAsCompleted(erroredSessionId, currentSessionId, selectedSession?.id);
+        setPendingPermissionRequests([]);
         const details = typeof latestMessage.details === 'string' ? latestMessage.details.trim() : '';
         const errorContent = details
           ? `Error: ${latestMessage.error}\n\n<details><summary>Technical details</summary>\n\n\`\`\`text\n${details.slice(0, 8000)}\n\`\`\`\n</details>`
@@ -641,6 +662,10 @@ export function useChatRealtimeHandlers({
 
       case 'cursor-error':
         if (isLegacyTaskMasterInstallError(latestMessage.error)) break;
+        flushAndFinalizePendingStream();
+        clearLoadingIndicators();
+        markSessionsAsCompleted(latestMessage.sessionId, currentSessionId, selectedSession?.id);
+        setPendingPermissionRequests([]);
         setChatMessages((previous) => [
           ...previous,
           { type: 'error', content: `Cursor error: ${latestMessage.error || 'Unknown error'}`, timestamp: new Date() },
@@ -1029,8 +1054,10 @@ export function useChatRealtimeHandlers({
 
       case 'codex-error':
         if (isLegacyTaskMasterInstallError(latestMessage.error)) break;
-        setIsLoading(false);
-        setCanAbortSession(false);
+        flushAndFinalizePendingStream();
+        clearLoadingIndicators();
+        markSessionsAsCompleted(latestMessage.sessionId, currentSessionId, selectedSession?.id);
+        setPendingPermissionRequests([]);
         setChatMessages((previous) => [...previous, { type: 'error', content: latestMessage.error || 'An error occurred with Codex', timestamp: new Date() }]);
         break;
 
