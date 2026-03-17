@@ -32,7 +32,11 @@
     "loadingSessions": "Loading sessions...",
     "unnamed": "Unnamed",
     "loading": "Loading...",
-    "showMore": "Show more sessions"
+    "showMore": "Show more sessions",
+    "mode": {
+      "research": "Research",
+      "workspaceQa": "Files"
+    }
   },
   "tooltips": {
     "viewEnvironments": "View Environments",

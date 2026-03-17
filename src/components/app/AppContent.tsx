@@ -48,6 +48,8 @@ export default function AppContent() {
     isInputFocused,
     externalMessageUpdate,
     importedProjectAnalysisPrompt,
+    newSessionMode,
+    setNewSessionMode,
     setActiveTab,
     setSidebarOpen,
     setIsInputFocused,
@@ -249,6 +251,8 @@ export default function AppContent() {
           importedProjectAnalysisPrompt={importedProjectAnalysisPrompt}
           clearImportedProjectAnalysisPrompt={clearImportedProjectAnalysisPrompt}
           onProjectSelect={handleProjectSelect}
+          newSessionMode={newSessionMode}
+          onNewSessionModeChange={setNewSessionMode}
         />
       </div>
 

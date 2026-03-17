@@ -1,7 +1,7 @@
 import { ChevronDown, Plus } from 'lucide-react';
 import type { TFunction } from 'i18next';
 import { Button } from '../../../ui/button';
-import type { Project, ProjectSession, SessionProvider } from '../../../../types/app';
+import type { Project, ProjectSession, SessionMode, SessionProvider } from '../../../../types/app';
 import type { SessionWithProvider, TouchHandlerFactory } from '../../types/types';
 import SidebarSessionItem from './SidebarSessionItem';
 
@@ -28,7 +28,8 @@ type SidebarProjectSessionsProps = {
     provider: SessionProvider,
   ) => void;
   onLoadMoreSessions: (project: Project) => void;
-  onNewSession: (project: Project) => void;
+  onNewSession: (project: Project, mode?: SessionMode) => void;
+  newSessionMode?: SessionMode;
   touchHandlerFactory: TouchHandlerFactory;
   t: TFunction;
 };
@@ -70,6 +71,7 @@ export default function SidebarProjectSessions({
   onDeleteSession,
   onLoadMoreSessions,
   onNewSession,
+  newSessionMode = 'research',
   touchHandlerFactory,
   t,
 }: SidebarProjectSessionsProps) {
@@ -138,7 +140,7 @@ export default function SidebarProjectSessions({
           className="w-full h-8 bg-primary hover:bg-primary/90 text-primary-foreground rounded-md flex items-center justify-center gap-2 font-medium text-xs active:scale-[0.98] transition-all duration-150"
           onClick={() => {
             onProjectSelect(project);
-            onNewSession(project);
+            onNewSession(project, newSessionMode);
           }}
         >
           <Plus className="w-3 h-3" />
@@ -150,7 +152,7 @@ export default function SidebarProjectSessions({
         variant="default"
         size="sm"
         className="hidden md:flex w-full justify-start gap-2 mt-1 h-8 text-xs font-medium bg-primary hover:bg-primary/90 text-primary-foreground transition-colors"
-        onClick={() => onNewSession(project)}
+        onClick={() => onNewSession(project, newSessionMode)}
       >
         <Plus className="w-3 h-3" />
         {t('sessions.newSession')}

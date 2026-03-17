@@ -74,6 +74,18 @@ const PROJECT_PIPELINE_FOLDERS = ['Survey', 'Ideation', 'Experiment', 'Publicati
 const LEGACY_DEFAULT_WORKSPACES_ROOT = path.join(os.homedir(), 'vibelab');
 const CURRENT_DEFAULT_WORKSPACES_ROOT = path.join(os.homedir(), 'dr-claw');
 
+function normalizeSessionMode(value) {
+    return value === 'workspace_qa' ? 'workspace_qa' : 'research';
+}
+
+function extractSessionModeFromMetadata(metadata) {
+    if (!metadata || typeof metadata !== 'object') {
+        return 'research';
+    }
+
+    return normalizeSessionMode(metadata.sessionMode || metadata.mode);
+}
+
 function normalizeTaskStatus(status) {
     const raw = String(status || '').trim().toLowerCase();
     if (!raw) return 'pending';
@@ -892,7 +904,9 @@ async function getSessions(projectName, limit = 5, offset = 0, userId = null) {
           // Upsert new sessions discovered from files to DB for caching
           if (!dbSessionMap.has(session.id)) {
             const lastActivity = session.lastActivity instanceof Date ? session.lastActivity.toISOString() : session.lastActivity;
-            sessionDb.upsertSession(session.id, projectName, 'claude', session.summary, lastActivity, session.messageCount);
+            sessionDb.upsertSession(session.id, projectName, 'claude', session.summary, lastActivity, session.messageCount, {
+              sessionMode: normalizeSessionMode(session.mode),
+            });
           }
         }
       });
@@ -1025,7 +1039,10 @@ async function parseJsonlSessions(filePath, projectName = null, dbSessionMap = n
                 lastActivity: new Date(),
                 cwd: entry.cwd || '',
                 lastUserMessage: null,
-                lastAssistantMessage: null
+                lastAssistantMessage: null,
+                mode: dbSessionMap && dbSessionMap.has(entry.sessionId)
+                  ? extractSessionModeFromMetadata(dbSessionMap.get(entry.sessionId).metadata)
+                  : 'research'
               });
             }
 
@@ -2162,8 +2179,14 @@ async function getGeminiSessions(projectPath, optionsOrUserId = null) {
           }
 
           // Upsert to database so next time is faster
+          const sessionMode = dbSessionMap.has(sessionId)
+            ? extractSessionModeFromMetadata(dbSessionMap.get(sessionId).metadata)
+            : 'research';
+
           if (!dbSessionMap.has(sessionId)) {
-            sessionDb.upsertSession(sessionId, projectName, 'gemini', finalName, stats.mtime.toISOString(), 0);
+            sessionDb.upsertSession(sessionId, projectName, 'gemini', finalName, stats.mtime.toISOString(), 0, {
+              sessionMode,
+            });
           }
 
           sessions.push({
@@ -2172,6 +2195,7 @@ async function getGeminiSessions(projectPath, optionsOrUserId = null) {
             createdAt: stats.birthtime.toISOString(),
             lastActivity: stats.mtime.toISOString(),
             messageCount: 0,
+            mode: sessionMode,
             projectPath: projectPath,
             filePath,
             __provider: 'gemini'
@@ -2260,6 +2284,7 @@ async function buildCodexSessionsIndex() {
         lastActivity: sessionData.timestamp ? new Date(sessionData.timestamp) : new Date(),
         cwd: sessionData.cwd,
         model: sessionData.model,
+        mode: normalizeSessionMode(sessionData.mode),
         filePath,
         provider: 'codex',
       };
@@ -2718,7 +2743,10 @@ async function renameSession(projectName, sessionId, newSummary, provider = 'cla
       await fs.appendFile(geminiSessionFile, JSON.stringify(summaryEntry) + '\n');
 
       // Also update Dr. Claw's own index (source of truth)
-      sessionDb.upsertSession(sessionId, projectName, provider, trimmedSummary, new Date().toISOString());
+      const existing = sessionDb.getSessionById(sessionId);
+      sessionDb.upsertSession(sessionId, projectName, provider, trimmedSummary, new Date().toISOString(), 0, {
+        sessionMode: extractSessionModeFromMetadata(existing?.metadata),
+      });
 
       console.log(`[Gemini] Renamed session ${sessionId} to "${trimmedSummary}"`);
       return true;
@@ -2751,7 +2779,10 @@ async function renameSession(projectName, sessionId, newSummary, provider = 'cla
       await db.close();
 
       // Update Dr. Claw's own index
-      sessionDb.upsertSession(sessionId, projectName, provider, trimmedSummary, new Date().toISOString());
+      const existing = sessionDb.getSessionById(sessionId);
+      sessionDb.upsertSession(sessionId, projectName, provider, trimmedSummary, new Date().toISOString(), 0, {
+        sessionMode: extractSessionModeFromMetadata(existing?.metadata),
+      });
 
       console.log(`[Cursor] Renamed session ${sessionId} to "${trimmedSummary}"`);
       return true;
@@ -2806,7 +2837,10 @@ async function renameSession(projectName, sessionId, newSummary, provider = 'cla
           await fs.appendFile(jsonlFile, JSON.stringify(summaryEntry) + '\n');
 
           // Update Dr. Claw's own index
-          sessionDb.upsertSession(sessionId, projectName, provider, trimmedSummary, new Date().toISOString());
+          const existing = sessionDb.getSessionById(sessionId);
+          sessionDb.upsertSession(sessionId, projectName, provider, trimmedSummary, new Date().toISOString(), 0, {
+            sessionMode: extractSessionModeFromMetadata(existing?.metadata),
+          });
 
           console.log(`[Claude] Renamed session ${sessionId} to "${trimmedSummary}"`);
           return true;

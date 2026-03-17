@@ -26,6 +26,7 @@ import { useFileMentions } from './useFileMentions';
 import { type SlashCommand, useSlashCommands } from './useSlashCommands';
 import type { Project, ProjectSession, SessionProvider } from '../../../types/app';
 import { escapeRegExp } from '../utils/chatFormatting';
+import type { SessionMode } from '../../../types/app';
 
 type PendingViewSession = {
   sessionId: string | null;
@@ -61,6 +62,7 @@ interface UseChatComposerStateArgs {
   setClaudeStatus: (status: { text: string; tokens: number; can_interrupt: boolean } | null) => void;
   setIsUserScrolledUp: (isScrolledUp: boolean) => void;
   setPendingPermissionRequests: Dispatch<SetStateAction<PendingPermissionRequest[]>>;
+  newSessionMode?: SessionMode;
 }
 
 interface MentionableFile {
@@ -116,6 +118,7 @@ export function useChatComposerState({
   setClaudeStatus,
   setIsUserScrolledUp,
   setPendingPermissionRequests,
+  newSessionMode = 'research',
 }: UseChatComposerStateArgs) {
   const [input, setInput] = useState(() => {
     if (typeof window !== 'undefined' && selectedProject) {
@@ -614,6 +617,7 @@ export function useChatComposerState({
       // Determine the session ID to use.
       // If we're on the home route ('/') and currentSessionId is null, we are starting a new session.
       const isExplicitNewSession = !currentSessionId && window.location.pathname === '/';
+      const isNewSession = isExplicitNewSession || (!currentSessionId && !selectedSession?.id);
       
       const effectiveSessionId = isExplicitNewSession 
         ? null 
@@ -664,6 +668,13 @@ export function useChatComposerState({
       console.log('[DEBUG] useChatComposerState - provider:', provider);
       console.log('[DEBUG] useChatComposerState - effectiveSessionId:', effectiveSessionId);
 
+      if (isNewSession) {
+        const sessionModeContext = newSessionMode === 'workspace_qa'
+          ? '[Context: session-mode=workspace_qa]\n[Context: Treat this as a lightweight workspace Q&A session. Focus on answering questions about files, code, and project structure. Do not start the research intake or pipeline workflow unless the user explicitly asks for it.]\n\n'
+          : '[Context: session-mode=research]\n[Context: This is a research workflow session. Follow the normal project research instructions and pipeline behavior.]\n\n';
+        messageContent = `${sessionModeContext}${messageContent}`;
+      }
+
       if (provider === 'cursor') {
         console.log('[DEBUG] Sending cursor-command');
         sendMessage({
@@ -679,6 +690,7 @@ export function useChatComposerState({
             skipPermissions: toolsSettings?.skipPermissions || false,
             toolsSettings,
             telemetryEnabled,
+            sessionMode: isNewSession ? newSessionMode : selectedSession?.mode,
           },
         });
       } else if (provider === 'gemini') {
@@ -697,6 +709,7 @@ export function useChatComposerState({
             images: uploadedImages,
             toolsSettings,
             telemetryEnabled,
+            sessionMode: isNewSession ? newSessionMode : selectedSession?.mode,
           },
         });
       } else if (provider === 'codex') {
@@ -713,6 +726,7 @@ export function useChatComposerState({
             model: codexModel,
             permissionMode: permissionMode === 'plan' ? 'default' : permissionMode,
             telemetryEnabled,
+            sessionMode: isNewSession ? newSessionMode : selectedSession?.mode,
           },
         });
       } else {
@@ -730,6 +744,7 @@ export function useChatComposerState({
             model: claudeModel,
             images: uploadedImages,
             telemetryEnabled,
+            sessionMode: isNewSession ? newSessionMode : selectedSession?.mode,
           },
         });
       }

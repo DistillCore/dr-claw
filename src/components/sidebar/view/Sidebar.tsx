@@ -43,6 +43,7 @@ function Sidebar({
   onOpenSkills,
   onOpenNews,
   onImportedProjectCreated,
+  newSessionMode,
 }: SidebarProps) {
   const { t } = useTranslation(['sidebar', 'common']);
   const { isPWA } = useDeviceSettings({ trackMobile: false });
@@ -165,6 +166,7 @@ function Sidebar({
       void loadMoreSessions(project);
     },
     onNewSession,
+    newSessionMode,
     onEditingSessionNameChange: setEditingSessionName,
     onStartEditingSession: (sessionId, initialName) => {
       setEditingSession(sessionId);

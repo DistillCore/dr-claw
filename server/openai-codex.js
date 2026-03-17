@@ -234,7 +234,8 @@ export async function queryCodex(command, options = {}, ws) {
     cwd,
     projectPath,
     model,
-    permissionMode = 'default'
+    permissionMode = 'default',
+    sessionMode
   } = options;
 
   const workingDirectory = cwd || projectPath || process.cwd();
@@ -281,7 +282,8 @@ export async function queryCodex(command, options = {}, ws) {
     sendMessage(ws, {
       type: 'session-created',
       sessionId: currentSessionId,
-      provider: 'codex'
+      provider: 'codex',
+      mode: sessionMode || 'research'
     });
 
     // Execute with streaming

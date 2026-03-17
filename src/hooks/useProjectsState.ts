@@ -11,6 +11,7 @@ import type {
   ProjectSession,
   ProjectsUpdatedMessage,
   PendingAutoIntake,
+  SessionMode,
 } from '../types/app';
 
 declare global {
@@ -18,6 +19,28 @@ declare global {
     handleProjectCreatedWithIntake?: (project: Project, options?: ProjectCreationOptions) => void;
   }
 }
+
+const SESSION_MODE_STORAGE_KEY = 'dr-claw-new-session-mode';
+
+const isSessionMode = (value: string | null | undefined): value is SessionMode =>
+  value === 'research' || value === 'workspace_qa';
+
+const readStoredNewSessionMode = (): SessionMode => {
+  if (typeof window === 'undefined') {
+    return 'research';
+  }
+
+  const stored = window.sessionStorage.getItem(SESSION_MODE_STORAGE_KEY);
+  return isSessionMode(stored) ? stored : 'research';
+};
+
+const persistNewSessionMode = (mode: SessionMode) => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  window.sessionStorage.setItem(SESSION_MODE_STORAGE_KEY, mode);
+};
 
 type UseProjectsStateArgs = {
   sessionId?: string;
@@ -131,6 +154,7 @@ export function useProjectsState({
   const [externalMessageUpdate, setExternalMessageUpdate] = useState(0);
   const [pendingAutoIntake, setPendingAutoIntake] = useState<PendingAutoIntake | null>(null);
   const [importedProjectAnalysisPrompt, setImportedProjectAnalysisPrompt] = useState<ImportedProjectAnalysisPrompt | null>(null);
+  const [newSessionMode, setNewSessionMode] = useState<SessionMode>(() => readStoredNewSessionMode());
 
   const loadingProgressTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const projectsUpdateDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -390,6 +414,11 @@ export function useProjectsState({
     (session: ProjectSession) => {
       setSelectedSession(session);
 
+      if (session.mode) {
+        persistNewSessionMode(session.mode);
+        setNewSessionMode(session.mode);
+      }
+
       if (activeTab !== 'git' && activeTab !== 'preview') {
         setActiveTab('chat');
       }
@@ -414,10 +443,12 @@ export function useProjectsState({
   );
 
   const handleNewSession = useCallback(
-    (project: Project) => {
+    (project: Project, mode: SessionMode = 'research') => {
       setSelectedProject(project);
       setSelectedSession(null);
       setActiveTab('chat');
+      persistNewSessionMode(mode);
+      setNewSessionMode(mode);
       navigate('/');
 
       if (isMobile) {
@@ -581,6 +612,7 @@ export function useProjectsState({
       onImportedProjectCreated: handleProjectCreatedWithIntake,
       importedProjectAnalysisPrompt,
       onDismissImportedProjectAnalysisPrompt: clearImportedProjectAnalysisPrompt,
+      newSessionMode,
     }),
     [
       handleNewSession,
@@ -599,6 +631,7 @@ export function useProjectsState({
       handleOpenSkills,
       handleOpenNews,
       importedProjectAnalysisPrompt,
+      newSessionMode,
       settingsInitialTab,
       selectedProject,
       selectedSession,
@@ -620,6 +653,8 @@ export function useProjectsState({
     settingsInitialTab,
     externalMessageUpdate,
     importedProjectAnalysisPrompt,
+    newSessionMode,
+    setNewSessionMode,
     setActiveTab,
     setSidebarOpen,
     setIsInputFocused,

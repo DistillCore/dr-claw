@@ -424,6 +424,9 @@ export function useChatRealtimeHandlers({
     switch (latestMessage.type) {
       case 'session-created':
         if (latestMessage.sessionId && (!currentSessionId || currentSessionId.startsWith('new-session-'))) {
+          if (selectedProject && latestMessage.mode) {
+            safeLocalStorage.setItem(`session_mode_${selectedProject.name}_${latestMessage.sessionId}`, String(latestMessage.mode));
+          }
           sessionStorage.setItem('pendingSessionId', latestMessage.sessionId);
           if ((latestMessage as any).provider === 'gemini') {
             sessionStorage.setItem('geminiSessionId', latestMessage.sessionId);

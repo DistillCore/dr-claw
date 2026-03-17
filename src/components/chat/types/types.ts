@@ -1,4 +1,4 @@
-import type { ImportedProjectAnalysisPrompt, PendingAutoIntake, Project, ProjectSession, SessionProvider } from '../../../types/app';
+import type { ImportedProjectAnalysisPrompt, PendingAutoIntake, Project, ProjectSession, SessionMode, SessionProvider } from '../../../types/app';
 
 export type Provider = SessionProvider;
 
@@ -121,6 +121,8 @@ export interface ChatInterfaceProps {
   clearPendingAutoIntake?: () => void;
   importedProjectAnalysisPrompt?: ImportedProjectAnalysisPrompt | null;
   clearImportedProjectAnalysisPrompt?: () => void;
+  newSessionMode?: SessionMode;
+  onNewSessionModeChange?: (mode: SessionMode) => void;
 }
 
 export interface ProviderAvailability {

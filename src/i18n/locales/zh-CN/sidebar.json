@@ -32,7 +32,11 @@
     "loadingSessions": "加载会话中...",
     "unnamed": "未命名",
     "loading": "加载中...",
-    "showMore": "显示更多会话"
+    "showMore": "显示更多会话",
+    "mode": {
+      "research": "研究",
+      "workspaceQa": "文件"
+    }
   },
   "tooltips": {
     "viewEnvironments": "查看环境",

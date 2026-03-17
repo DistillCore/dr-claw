@@ -119,12 +119,14 @@ export default function GuidedPromptStarter({
           </div>
           <div>
             {username ? (
-              <p className="text-base sm:text-lg font-medium tracking-tight text-white/78">
+              <p className="text-base sm:text-lg font-medium tracking-tight text-foreground/70 dark:text-white/78">
                 {t('guidedStarter.greeting', { username })}
               </p>
             ) : null}
-            <p className="text-2xl sm:text-3xl font-semibold tracking-tight text-white">{t('guidedStarter.title')}</p>
-            <p className="mt-1 text-sm text-white/55 leading-relaxed">
+            <p className="text-2xl sm:text-3xl font-semibold tracking-tight text-foreground dark:text-white">
+              {t('guidedStarter.title')}
+            </p>
+            <p className="mt-1 text-sm text-muted-foreground leading-relaxed dark:text-white/55">
               {t('guidedStarter.description')}
             </p>
           </div>
@@ -141,8 +143,8 @@ export default function GuidedPromptStarter({
               onClick={() => handleScenarioSelect(scenario)}
               className={`rounded-full border px-3.5 py-2.5 text-left transition-colors ${
                 isActive
-                  ? 'border-cyan-400/70 bg-cyan-400/14 text-white'
-                  : 'border-white/8 bg-white/[0.04] text-white/78 hover:bg-white/[0.08] hover:text-white'
+                  ? 'border-cyan-500/50 bg-cyan-500/12 text-foreground dark:border-cyan-400/70 dark:bg-cyan-400/14 dark:text-white'
+                  : 'border-border/70 bg-card/60 text-foreground/80 hover:bg-accent hover:text-foreground dark:border-white/8 dark:bg-white/[0.04] dark:text-white/78 dark:hover:bg-white/[0.08] dark:hover:text-white'
               }`}
             >
               <p className="flex items-center gap-2 text-sm font-medium">

@@ -67,6 +67,10 @@ export const getSessionName = (session: SessionWithProvider, t: TFunction): stri
   return session.summary || t('projects.newSession');
 };
 
+export const getSessionMode = (session: SessionWithProvider) => {
+  return session.mode === 'workspace_qa' ? 'workspace_qa' : 'research';
+};
+
 export const getSessionTime = (session: SessionWithProvider): string => {
   if (session.__provider === 'cursor') {
     return String(session.createdAt || '');
@@ -95,6 +99,7 @@ export const createSessionViewModel = (
     sessionName: getSessionName(session, t),
     sessionTime: getSessionTime(session),
     messageCount: Number(session.messageCount || 0),
+    mode: getSessionMode(session),
   };
 };
 

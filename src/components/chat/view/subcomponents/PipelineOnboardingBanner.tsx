@@ -3,12 +3,14 @@ import { FlaskConical, Sparkles, X, FileText, ListChecks } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useTaskMaster } from '../../../../contexts/TaskMasterContext';
 import { api } from '../../../../utils/api';
+import type { SessionMode } from '../../../../types/app';
 
 type PipelineState = 'loading' | 'no-brief' | 'no-tasks' | 'ready';
 
 interface PipelineOnboardingBannerProps {
   setInput: React.Dispatch<React.SetStateAction<string>>;
   textareaRef: React.RefObject<HTMLTextAreaElement>;
+  sessionMode?: SessionMode;
 }
 
 interface TaskMasterProject {
@@ -23,6 +25,7 @@ const TEMPLATE_NO_TASKS = `I already have a research brief but no tasks yet. Ple
 export default function PipelineOnboardingBanner({
   setInput,
   textareaRef,
+  sessionMode = 'research',
 }: PipelineOnboardingBannerProps) {
   const { t } = useTranslation('chat');
   const { tasks: rawTasks, currentProject: rawCurrentProject, isLoadingTasks } = useTaskMaster();
@@ -101,7 +104,7 @@ export default function PipelineOnboardingBanner({
     return () => { cancelled = true; };
   }, [tasks, currentProject?.name, isLoadingTasks]);
 
-  if (dismissed || pipelineState === 'loading' || pipelineState === 'ready') {
+  if (sessionMode !== 'research' || dismissed || pipelineState === 'loading' || pipelineState === 'ready') {
     return null;
   }
 

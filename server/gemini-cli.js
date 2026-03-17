@@ -439,7 +439,7 @@ async function syncSessionMetadata(sessionId, projectPath) {
  */
 export async function spawnGemini(command, options = {}, ws) {
   return new Promise(async (resolve, reject) => {
-    const { sessionId, projectPath, cwd, model, images, permissionMode, toolsSettings } = options;
+    const { sessionId, projectPath, cwd, model, images, permissionMode, toolsSettings, sessionMode } = options;
     let capturedSessionId = sessionId;
     let sessionCreatedSent = false;
     let messageStartedSent = false;
@@ -771,7 +771,7 @@ export async function spawnGemini(command, options = {}, ws) {
               if (ws.setSessionId && typeof ws.setSessionId === 'function') ws.setSessionId(capturedSessionId);
               if (!sessionCreatedSent) {
                 sessionCreatedSent = true;
-                ws.send({ type: 'session-created', sessionId: capturedSessionId, provider: 'gemini' });
+                ws.send({ type: 'session-created', sessionId: capturedSessionId, provider: 'gemini', mode: sessionMode || 'research' });
               }
             }
             break;

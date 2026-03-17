@@ -9,10 +9,12 @@ import SessionProviderLogo from '../../../SessionProviderLogo';
 import { Markdown } from './Markdown';
 import type { ChatMessage } from '../../types/types';
 import type { ProviderAvailability } from '../../types/types';
-import type { Project, ProjectSession, SessionProvider } from '../../../../types/app';
+import type { Project, ProjectSession, SessionMode, SessionProvider } from '../../../../types/app';
 import AssistantThinkingIndicator from './AssistantThinkingIndicator';
 import { getIntrinsicMessageKey } from '../../utils/messageKeys';
 import { groupMessagesIntoTurns } from '../../utils/groupAgentTurns';
+
+const WORKSPACE_QA_GREETING = `Ask about any file, module, or implementation detail in this workspace. I will stay focused on code and project structure unless you explicitly ask to start research planning.`;
 
 interface ChatMessagesPaneProps {
   scrollContainerRef: RefObject<HTMLDivElement>;
@@ -57,6 +59,8 @@ interface ChatMessagesPaneProps {
   isLoading: boolean;
   intakeGreeting?: string | null;
   providerAvailability: Record<SessionProvider, ProviderAvailability>;
+  newSessionMode?: SessionMode;
+  onNewSessionModeChange?: (mode: SessionMode) => void;
 }
 
 export default function ChatMessagesPane({
@@ -102,6 +106,8 @@ export default function ChatMessagesPane({
   isLoading,
   intakeGreeting,
   providerAvailability,
+  newSessionMode = 'research',
+  onNewSessionModeChange,
 }: ChatMessagesPaneProps) {
   const { t } = useTranslation('chat');
   const messageKeyMapRef = useRef<WeakMap<ChatMessage, string>>(new WeakMap());
@@ -171,6 +177,8 @@ export default function ChatMessagesPane({
             projectName={selectedProject.name}
             setInput={setInput}
             providerAvailability={providerAvailability}
+            newSessionMode={newSessionMode}
+            onNewSessionModeChange={onNewSessionModeChange}
           />
           {intakeGreeting && (
             <div className="flex flex-col w-full mb-6 mt-4">
@@ -185,6 +193,23 @@ export default function ChatMessagesPane({
               <div className="w-full pl-0">
                 <Markdown className="prose prose-md max-w-none dark:prose-invert prose-gray text-[15.5px] leading-relaxed">
                   {intakeGreeting}
+                </Markdown>
+              </div>
+            </div>
+          )}
+          {!intakeGreeting && !selectedSession && !currentSessionId && newSessionMode === 'workspace_qa' && (
+            <div className="flex flex-col w-full mb-6 mt-4">
+              <div className="flex items-center space-x-2 mb-2">
+                <div className="w-6 h-6 rounded-full flex items-center justify-center text-white text-sm flex-shrink-0">
+                  <SessionProviderLogo provider={provider} className="w-full h-full" />
+                </div>
+                <div className="text-xs font-semibold text-gray-900 dark:text-white">
+                  {t('session.mode.workspaceQaTitle')}
+                </div>
+              </div>
+              <div className="w-full pl-0">
+                <Markdown className="prose prose-md max-w-none dark:prose-invert prose-gray text-[15.5px] leading-relaxed">
+                  {WORKSPACE_QA_GREETING}
                 </Markdown>
               </div>
             </div>

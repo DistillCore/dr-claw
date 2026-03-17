@@ -177,6 +177,17 @@
     "cliBackendHint": "请选择 CLI 后端（Claude Code / Cursor / Codex）"
   },
   "session": {
+    "mode": {
+      "title": "选择会话类型",
+      "subtitle": "决定这个会话是用于研究流程，还是仅用于项目文件问答。",
+      "research": "研究",
+      "workspaceQa": "文件问答",
+      "researchTitle": "Research Session",
+      "researchDescription": "使用研究工作流、onboarding 提示和 pipeline 引导。",
+      "workspaceQaTitle": "Workspace Q&A",
+      "workspaceQaDescription": "只询问文件、模块和实现细节，不触发研究流程。",
+      "workspaceQaHint": "这个会话会聚焦仓库问题，除非你明确要求开始研究规划。"
+    },
     "continue": {
       "title": "继续您的对话",
       "description": "询问有关代码的问题、请求更改或获取开发任务的帮助"

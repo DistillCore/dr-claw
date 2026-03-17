@@ -56,6 +56,8 @@ function MainContent({
   importedProjectAnalysisPrompt,
   clearImportedProjectAnalysisPrompt,
   onProjectSelect,
+  newSessionMode,
+  onNewSessionModeChange,
 }: MainContentProps) {
   const { preferences } = useUiPreferences();
   const { autoExpandTools, showRawParameters, showThinking, autoScrollToBottom, sendByCtrlEnter } = preferences;
@@ -206,6 +208,8 @@ function MainContent({
                 clearPendingAutoIntake={clearPendingAutoIntake}
                 importedProjectAnalysisPrompt={importedProjectAnalysisPrompt}
                 clearImportedProjectAnalysisPrompt={clearImportedProjectAnalysisPrompt}
+                newSessionMode={newSessionMode}
+                onNewSessionModeChange={onNewSessionModeChange}
               />
             </ErrorBoundary>
           </div>

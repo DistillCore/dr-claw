@@ -1,5 +1,5 @@
 import type { Dispatch, MouseEvent, RefObject, SetStateAction } from 'react';
-import type { AppTab, ImportedProjectAnalysisPrompt, PendingAutoIntake, Project, ProjectSession } from '../../../types/app';
+import type { AppTab, ImportedProjectAnalysisPrompt, PendingAutoIntake, Project, ProjectSession, SessionMode } from '../../../types/app';
 
 export type SessionLifecycleHandler = (sessionId?: string | null) => void;
 
@@ -73,6 +73,8 @@ export interface MainContentProps {
   importedProjectAnalysisPrompt?: ImportedProjectAnalysisPrompt | null;
   clearImportedProjectAnalysisPrompt?: () => void;
   onProjectSelect: (project: Project) => void;
+  newSessionMode?: SessionMode;
+  onNewSessionModeChange?: (mode: SessionMode) => void;
 }
 
 export interface MainContentHeaderProps {

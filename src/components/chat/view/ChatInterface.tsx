@@ -28,6 +28,7 @@ const DEFAULT_PROVIDER_AVAILABILITY: Record<Provider, ProviderAvailability> = {
 };
 
 const INTAKE_GREETING = `Hello! I'm your Dr. Claw research assistant, here to help you set up your research pipeline.\n\nTo get started, could you tell me about your research field or topic?`;
+const WORKSPACE_QA_GREETING = `Ask about any file, module, or implementation detail in this workspace. I will stay focused on code and project structure unless you explicitly ask to start research planning.`;
 
 const getAutoIntakePrompt = (pendingAutoIntake?: PendingAutoIntake | null) => {
   const prompt = pendingAutoIntake?.prompt?.trim();
@@ -89,6 +90,8 @@ function ChatInterface({
   clearPendingAutoIntake,
   importedProjectAnalysisPrompt,
   clearImportedProjectAnalysisPrompt,
+  newSessionMode = 'research',
+  onNewSessionModeChange,
 }: ChatInterfaceProps) {
   const { tasksEnabled, isTaskMasterInstalled } = useTasksSettings();
   const { refreshTasks } = useTaskMaster();
@@ -249,6 +252,7 @@ function ChatInterface({
     setClaudeStatus,
     setIsUserScrolledUp,
     setPendingPermissionRequests,
+    newSessionMode,
   });
 
   useChatRealtimeHandlers({
@@ -403,7 +407,7 @@ function ChatInterface({
       lastAutoIntakeTriggerIdRef.current = triggerId;
     }
 
-    if (!pendingAutoIntake) {
+    if (!pendingAutoIntake || newSessionMode !== 'research') {
       autoIntakeTriggeredRef.current = false;
       return;
     }
@@ -445,7 +449,14 @@ function ChatInterface({
     clearPendingAutoIntake,
     setIntakeGreeting,
     submitProgrammaticInput,
+    newSessionMode,
   ]);
+
+  useEffect(() => {
+    if (selectedSession?.mode) {
+      onNewSessionModeChange?.(selectedSession.mode);
+    }
+  }, [onNewSessionModeChange, selectedSession?.id, selectedSession?.mode]);
 
   useEffect(() => {
     if (!isLoading || !canAbortSession) {
@@ -696,6 +707,8 @@ function ChatInterface({
           selectedProject={selectedProject}
           isLoading={isLoading}
           providerAvailability={providerAvailability}
+          newSessionMode={newSessionMode}
+          onNewSessionModeChange={onNewSessionModeChange}
         />
 
         <div className="px-2 sm:px-4 max-w-5xl mx-auto w-full">

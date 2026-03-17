@@ -3,7 +3,7 @@ import { Check, ChevronDown, ChevronRight, Edit3, Folder, FolderOpen, Star, Tras
 import type { TFunction } from 'i18next';
 import { cn } from '../../../../lib/utils';
 import TaskIndicator from '../../../TaskIndicator';
-import type { Project, ProjectSession, SessionProvider } from '../../../../types/app';
+import type { Project, ProjectSession, SessionMode, SessionProvider } from '../../../../types/app';
 import type { MCPServerStatus, SessionWithProvider, TouchHandlerFactory } from '../../types/types';
 import { getTaskIndicatorStatus } from '../../utils/utils';
 import SidebarProjectSessions from './SidebarProjectSessions';
@@ -41,7 +41,8 @@ type SidebarProjectItemProps = {
     provider: SessionProvider,
   ) => void;
   onLoadMoreSessions: (project: Project) => void;
-  onNewSession: (project: Project) => void;
+  onNewSession: (project: Project, mode?: SessionMode) => void;
+  newSessionMode?: SessionMode;
   onEditingSessionNameChange: (value: string) => void;
   onStartEditingSession: (sessionId: string, initialName: string) => void;
   onCancelEditingSession: () => void;
@@ -88,6 +89,7 @@ export default function SidebarProjectItem({
   onDeleteSession,
   onLoadMoreSessions,
   onNewSession,
+  newSessionMode,
   onEditingSessionNameChange,
   onStartEditingSession,
   onCancelEditingSession,
@@ -424,6 +426,7 @@ export default function SidebarProjectItem({
         onDeleteSession={onDeleteSession}
         onLoadMoreSessions={onLoadMoreSessions}
         onNewSession={onNewSession}
+        newSessionMode={newSessionMode}
         touchHandlerFactory={touchHandlerFactory}
         t={t}
       />

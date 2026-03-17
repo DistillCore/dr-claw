@@ -65,6 +65,9 @@ export default function SidebarSessionItem({
     onDeleteSession(project.name, session.id, sessionView.sessionName, session.__provider);
   };
 
+  const modeBadgeLabel =
+    sessionView.mode === 'workspace_qa' ? t('sessions.mode.workspaceQa') : t('sessions.mode.research');
+
   return (
     <div className="group relative">
       {sessionView.isActive && (
@@ -106,6 +109,9 @@ export default function SidebarSessionItem({
                     {sessionView.messageCount}
                   </Badge>
                 )}
+                <Badge variant="outline" className="text-[10px] px-1.5 py-0 ml-1">
+                  {modeBadgeLabel}
+                </Badge>
                 <span className="ml-1 opacity-70">
                   <SessionProviderLogo provider={session.__provider} className="w-3 h-3" />
                 </span>
@@ -153,6 +159,12 @@ export default function SidebarSessionItem({
                     {sessionView.messageCount}
                   </Badge>
                 )}
+                <Badge
+                  variant="outline"
+                  className="text-[10px] px-1.5 py-0 ml-1 group-hover:opacity-0 transition-opacity"
+                >
+                  {modeBadgeLabel}
+                </Badge>
                 <span className="ml-1 opacity-70 group-hover:opacity-0 transition-opacity">
                   <SessionProviderLogo provider={session.__provider} className="w-3 h-3" />
                 </span>

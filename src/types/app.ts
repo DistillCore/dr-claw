@@ -1,5 +1,7 @@
 export type SessionProvider = 'claude' | 'cursor' | 'codex' | 'gemini';
 
+export type SessionMode = 'research' | 'workspace_qa';
+
 export interface PendingAutoIntake {
   prompt?: string | null;
   triggerId?: string | null;
@@ -22,6 +24,7 @@ export interface ProjectSession {
   title?: string;
   summary?: string;
   name?: string;
+  mode?: SessionMode;
   createdAt?: string;
   created_at?: string;
   updated_at?: string;

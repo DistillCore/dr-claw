@@ -3,7 +3,7 @@ import { Check } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import SessionProviderLogo from '../../../SessionProviderLogo';
 import { CLAUDE_MODELS, CURSOR_MODELS, CODEX_MODELS, GEMINI_MODELS } from '../../../../../shared/modelConstants';
-import type { ProjectSession, SessionProvider } from '../../../../types/app';
+import type { ProjectSession, SessionMode, SessionProvider } from '../../../../types/app';
 import GuidedPromptStarter from './GuidedPromptStarter';
 import type { ProviderAvailability } from '../../types/types';
 
@@ -24,6 +24,8 @@ interface ProviderSelectionEmptyStateProps {
   projectName: string;
   setInput: React.Dispatch<React.SetStateAction<string>>;
   providerAvailability: Record<SessionProvider, ProviderAvailability>;
+  newSessionMode: SessionMode;
+  onNewSessionModeChange?: (mode: SessionMode) => void;
 }
 
 type ProviderDef = {
@@ -102,8 +104,23 @@ export default function ProviderSelectionEmptyState({
   projectName,
   setInput,
   providerAvailability,
+  newSessionMode,
+  onNewSessionModeChange,
 }: ProviderSelectionEmptyStateProps) {
   const { t } = useTranslation('chat');
+
+  const sessionModeChoices: Array<{ id: SessionMode; titleKey: string; descriptionKey: string }> = [
+    {
+      id: 'research',
+      titleKey: 'session.mode.researchTitle',
+      descriptionKey: 'session.mode.researchDescription',
+    },
+    {
+      id: 'workspace_qa',
+      titleKey: 'session.mode.workspaceQaTitle',
+      descriptionKey: 'session.mode.workspaceQaDescription',
+    },
+  ];
 
   const selectProvider = (next: SessionProvider) => {
     if (providerAvailability[next]?.cliAvailable === false) {
@@ -130,13 +147,75 @@ export default function ProviderSelectionEmptyState({
       <div className="flex items-center justify-center min-h-[56vh] px-4 py-8">
         <div className="w-full max-w-2xl">
           <div className="max-w-2xl mx-auto">
-            <GuidedPromptStarter
-              projectName={projectName}
-              setInput={setInput}
-              textareaRef={textareaRef}
-            />
+            <div className="max-w-2xl mx-auto mb-6">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <h2 className="text-[11px] sm:text-xs font-medium uppercase tracking-[0.22em] text-muted-foreground/75">
+                  {t('session.mode.title')}
+                </h2>
+                <span className="rounded-full border border-border/70 bg-card/70 px-2 py-1 text-[10px] font-medium text-muted-foreground">
+                  2 modes
+                </span>
+              </div>
+              <p className="text-[11px] text-muted-foreground/75 mb-3">
+                {t('session.mode.subtitle')}
+              </p>
 
-            <div className="max-w-xl mx-auto mt-10 sm:mt-12">
+              <div className="grid items-start gap-2 sm:grid-cols-2">
+                {sessionModeChoices.map((choice) => {
+                  const active = newSessionMode === choice.id;
+                  const tone = choice.id === 'research'
+                    ? 'from-sky-500/14 to-cyan-500/8 dark:from-sky-400/14 dark:to-cyan-400/8'
+                    : 'from-emerald-500/14 to-teal-500/8 dark:from-emerald-400/14 dark:to-teal-400/8';
+                  const accent = choice.id === 'research'
+                    ? 'text-sky-700 dark:text-sky-300'
+                    : 'text-emerald-700 dark:text-emerald-300';
+                  return (
+                    <button
+                      key={choice.id}
+                      type="button"
+                      onClick={() => onNewSessionModeChange?.(choice.id)}
+                      className={`group h-full rounded-xl border px-3.5 py-3 align-top text-left transition-all duration-150 ${active
+                        ? 'border-primary/60 bg-card shadow-sm ring-1 ring-primary/10'
+                        : 'border-border/70 bg-card/45 hover:border-border hover:bg-card/80'
+                      }`}
+                    >
+                      <div className="flex h-full items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1 self-start">
+                          <div className="flex items-center gap-2">
+                            <span className={`inline-flex h-2.5 w-2.5 rounded-full bg-gradient-to-br ${tone}`} />
+                            <p className="text-sm font-semibold text-foreground leading-none">
+                              {t(choice.titleKey)}
+                            </p>
+                          </div>
+                          <p className={`mt-2 text-[11px] font-medium ${accent}`}>
+                            {choice.id === 'research' ? t('session.mode.research') : t('session.mode.workspaceQa')}
+                          </p>
+                          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                            {t(choice.descriptionKey)}
+                          </p>
+                        </div>
+                        <span className={`mt-0.5 inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full border transition-all ${active
+                          ? 'border-primary bg-primary text-primary-foreground shadow-sm'
+                          : 'border-border/80 bg-background text-transparent group-hover:border-primary/40'
+                        }`}>
+                          <Check className="w-3 h-3" strokeWidth={3} />
+                        </span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {newSessionMode === 'research' && (
+              <GuidedPromptStarter
+                projectName={projectName}
+                setInput={setInput}
+                textareaRef={textareaRef}
+              />
+            )}
+
+            <div className="max-w-xl mx-auto mt-8 sm:mt-10">
               <div className="text-center mb-3">
                 <h2 className="text-[11px] sm:text-xs font-medium uppercase tracking-[0.22em] text-muted-foreground/75">
                   {t('providerSelection.title')}
@@ -221,6 +300,11 @@ export default function ProviderSelectionEmptyState({
                     ? t('providerSelection.readyPrompt.claude', { model: claudeModel })
                     : t('providerSelection.readyPrompt.default')}
                 </p>
+                {newSessionMode === 'workspace_qa' && (
+                  <p className="text-center text-[10px] text-muted-foreground/60 mt-1.5">
+                    {t('session.mode.workspaceQaHint')}
+                  </p>
+                )}
               </div>
             </div>
           </div>
