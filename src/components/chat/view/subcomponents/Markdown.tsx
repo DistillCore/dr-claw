@@ -200,6 +200,26 @@ export function Markdown({ children, className, onFileOpen }: MarkdownProps) {
 
     return {
       ...markdownComponents,
+      // Make markdown links open as files if href looks like a file path
+      a: ({ href, children: linkChildren }: { href?: string; children?: React.ReactNode }) => {
+        if (href && !/^(?:https?:|mailto:|tel:|#)/.test(href) && isFilePath(href)) {
+          const { filePath } = parseFilePath(href);
+          return (
+            <button
+              onClick={() => onFileOpen(filePath)}
+              className="text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 hover:underline cursor-pointer transition-colors"
+              title={`Open ${filePath}`}
+            >
+              {linkChildren}
+            </button>
+          );
+        }
+        return (
+          <a href={href} className="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener noreferrer">
+            {linkChildren}
+          </a>
+        );
+      },
       // Make bold text clickable if it looks like a file path
       strong: ({ children: strongChildren }: { children?: React.ReactNode }) => {
         const text = typeof strongChildren === 'string'
