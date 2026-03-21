@@ -46,6 +46,7 @@ export default function AppContent() {
     activeTab,
     sidebarOpen,
     isLoadingProjects,
+    isLoadingTrashProjects,
     isInputFocused,
     externalMessageUpdate,
     importedProjectAnalysisPrompt,
@@ -251,6 +252,7 @@ export default function AppContent() {
           isMobile={isMobile}
           onMenuClick={() => setSidebarOpen(true)}
           isLoading={isLoadingProjects}
+          isTrashLoading={isLoadingTrashProjects}
           onInputFocusChange={setIsInputFocused}
           onSessionActive={markSessionAsActive}
           onSessionInactive={markSessionAsInactive}

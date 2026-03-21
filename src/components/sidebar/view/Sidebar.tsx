@@ -189,7 +189,6 @@ function Sidebar({
     <>
       <SidebarModals
         projects={projects}
-        trashProjects={trashProjects}
         showSettings={showSettings}
         settingsInitialTab={settingsInitialTab}
         onCloseSettings={onCloseSettings}

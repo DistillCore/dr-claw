@@ -43,6 +43,7 @@ function MainContent({
   isMobile,
   onMenuClick,
   isLoading,
+  isTrashLoading,
   onInputFocusChange,
   onSessionActive,
   onSessionInactive,
@@ -163,10 +164,12 @@ function MainContent({
         <div className="flex-1 min-h-0 overflow-hidden">
           <TrashDashboard
             projects={trashProjects}
+            isLoading={Boolean(isTrashLoading)}
             onRefresh={async () => {
-              if (window.refreshProjects) {
-                await window.refreshProjects();
-              }
+              await Promise.all([
+                window.refreshProjects?.(),
+                window.refreshTrashProjects?.(),
+              ]);
             }}
           />
         </div>

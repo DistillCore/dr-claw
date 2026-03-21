@@ -68,6 +68,7 @@ export interface MainContentProps {
   isMobile: boolean;
   onMenuClick: () => void;
   isLoading: boolean;
+  isTrashLoading?: boolean;
   onInputFocusChange: (focused: boolean) => void;
   onSessionActive: SessionLifecycleHandler;
   onSessionInactive: SessionLifecycleHandler;

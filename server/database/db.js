@@ -589,12 +589,19 @@ const sessionDb = {
         return [];
       }
 
-      const placeholders = projectNames.map(() => '?').join(', ');
-      const rows = db.prepare(
-        `SELECT * FROM session_metadata WHERE project_name IN (${placeholders}) ORDER BY datetime(last_activity) DESC, datetime(created_at) DESC`
-      ).all(...projectNames);
+      const chunkSize = 900;
+      const allRows = [];
 
-      return rows.map(row => ({
+      for (let index = 0; index < projectNames.length; index += chunkSize) {
+        const chunk = projectNames.slice(index, index + chunkSize);
+        const placeholders = chunk.map(() => '?').join(', ');
+        const rows = db.prepare(
+          `SELECT * FROM session_metadata WHERE project_name IN (${placeholders}) ORDER BY datetime(last_activity) DESC, datetime(created_at) DESC`
+        ).all(...chunk);
+        allRows.push(...rows);
+      }
+
+      return allRows.map(row => ({
         ...row,
         metadata: row.metadata ? JSON.parse(row.metadata) : null
       }));

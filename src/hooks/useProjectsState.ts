@@ -167,6 +167,7 @@ export function useProjectsState({
   const [activeTab, setActiveTab] = useState<AppTab>('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isLoadingProjects, setIsLoadingProjects] = useState(true);
+  const [isLoadingTrashProjects, setIsLoadingTrashProjects] = useState(false);
   const [loadingProgress, setLoadingProgress] = useState<LoadingProgress | null>(null);
   const [isInputFocused, setIsInputFocused] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -183,12 +184,8 @@ export function useProjectsState({
   const fetchProjects = useCallback(async () => {
     try {
       setIsLoadingProjects(true);
-      const [projectsResponse, trashResponse] = await Promise.all([
-        api.projects(),
-        api.trashedProjects(),
-      ]);
+      const projectsResponse = await api.projects();
       const projectData = (await projectsResponse.json()) as Project[];
-      const trashData = trashResponse.ok ? await trashResponse.json() as TrashProject[] : [];
 
       setProjects((prevProjects) => {
         if (prevProjects.length === 0) {
@@ -199,7 +196,6 @@ export function useProjectsState({
           ? projectData
           : prevProjects;
       });
-      setTrashProjects(trashData);
     } catch (error) {
       console.error('Error fetching projects:', error);
     } finally {
@@ -209,6 +205,7 @@ export function useProjectsState({
 
   const fetchTrashProjects = useCallback(async () => {
     try {
+      setIsLoadingTrashProjects(true);
       const response = await api.trashedProjects();
       if (!response.ok) {
         return;
@@ -218,6 +215,8 @@ export function useProjectsState({
       setTrashProjects(trashData);
     } catch (error) {
       console.error('Error fetching trashed projects:', error);
+    } finally {
+      setIsLoadingTrashProjects(false);
     }
   }, []);
 
@@ -229,6 +228,12 @@ export function useProjectsState({
   useEffect(() => {
     void fetchProjects();
   }, [fetchProjects]);
+
+  useEffect(() => {
+    if (activeTab === 'trash') {
+      void fetchTrashProjects();
+    }
+  }, [activeTab, fetchTrashProjects]);
 
   useEffect(() => {
     if (!latestMessage) {
@@ -358,10 +363,9 @@ export function useProjectsState({
       }
 
       setProjects(updatedProjects);
-      void api.trashedProjects()
-        .then((response) => response.ok ? response.json() as Promise<TrashProject[]> : [])
-        .then((trash) => setTrashProjects(trash))
-        .catch((error) => console.error('Error fetching trashed projects:', error));
+      if (activeTab === 'trash') {
+        void fetchTrashProjects();
+      }
 
       if (!selectedProject) {
         return;
@@ -391,7 +395,7 @@ export function useProjectsState({
         setSelectedSession(null);
       }
     }, 250);
-  }, [latestMessage, selectedProject, selectedSession, activeSessions, projects]);
+  }, [activeTab, activeSessions, fetchTrashProjects, latestMessage, projects, selectedProject, selectedSession]);
 
   useEffect(() => {
     return () => {
@@ -599,12 +603,13 @@ export function useProjectsState({
     setSelectedProject(null);
     setSelectedSession(null);
     setActiveTab('trash');
+    void fetchTrashProjects();
     navigate('/');
 
     if (isMobile) {
       setSidebarOpen(false);
     }
-  }, [isMobile, navigate]);
+  }, [fetchTrashProjects, isMobile, navigate]);
 
   const handleOpenSkills = useCallback(() => {
     setSelectedProject(null);
@@ -725,6 +730,7 @@ export function useProjectsState({
       onSessionDelete: handleSessionDelete,
       onProjectDelete: handleProjectDelete,
       isLoading: isLoadingProjects,
+      isTrashLoading: isLoadingTrashProjects,
       loadingProgress,
       onRefresh: handleSidebarRefresh,
       onShowSettings: () => setShowSettings(true),
@@ -743,30 +749,31 @@ export function useProjectsState({
       newSessionMode,
     }),
     [
+      activeTab,
+      clearImportedProjectAnalysisPrompt,
       handleNewSession,
+      handleOpenDashboard,
+      handleOpenNews,
+      handleOpenSkills,
+      handleOpenTrash,
       handleProjectCreatedWithIntake,
       handleProjectDelete,
       handleProjectSelect,
       handleSessionDelete,
       handleSessionSelect,
       handleSidebarRefresh,
+      importedProjectAnalysisPrompt,
       isLoadingProjects,
+      isLoadingTrashProjects,
       isMobile,
       loadingProgress,
-      projects,
-      trashProjects,
-      activeTab,
-      handleOpenDashboard,
-      handleOpenTrash,
-      handleOpenSkills,
-      handleOpenNews,
-      importedProjectAnalysisPrompt,
       newSessionMode,
-      settingsInitialTab,
+      projects,
       selectedProject,
       selectedSession,
+      settingsInitialTab,
       showSettings,
-      clearImportedProjectAnalysisPrompt,
+      trashProjects,
     ],
   );
 
@@ -778,6 +785,7 @@ export function useProjectsState({
     activeTab,
     sidebarOpen,
     isLoadingProjects,
+    isLoadingTrashProjects,
     loadingProgress,
     isInputFocused,
     showSettings,

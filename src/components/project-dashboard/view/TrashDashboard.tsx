@@ -1,5 +1,5 @@
 import { AlertTriangle, ArchiveRestore, FolderX, Trash2 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { api } from '../../../utils/api';
@@ -10,15 +10,21 @@ import { formatTimeAgo } from '../../../utils/dateUtils';
 type TrashDashboardProps = {
   projects: TrashProject[];
   onRefresh: () => Promise<void> | void;
+  isLoading?: boolean;
 };
 
 type DeleteMode = 'logical' | 'physical';
 
-export default function TrashDashboard({ projects, onRefresh }: TrashDashboardProps) {
+export default function TrashDashboard({ projects, onRefresh, isLoading = false }: TrashDashboardProps) {
   const { t } = useTranslation(['common', 'sidebar']);
   const [loadingKey, setLoadingKey] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<TrashProject | null>(null);
-  const currentTime = new Date();
+  const [currentTime, setCurrentTime] = useState(() => new Date());
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setCurrentTime(new Date()), 60000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const handleRestore = async (project: TrashProject) => {
     setLoadingKey(`restore:${project.name}`);
@@ -56,7 +62,12 @@ export default function TrashDashboard({ projects, onRefresh }: TrashDashboardPr
   return (
     <div className="h-full overflow-y-auto bg-gradient-to-b from-background via-background to-muted/20">
       <div className="mx-auto max-w-5xl px-4 py-6 sm:px-6 lg:px-8">
-        {projects.length === 0 ? (
+        {isLoading ? (
+          <div className="rounded-3xl border border-border bg-card/70 px-8 py-16 text-center shadow-sm">
+            <div className="mx-auto h-16 w-16 animate-pulse rounded-2xl bg-muted" />
+            <p className="mt-6 text-sm text-muted-foreground">{t('common:status.loading')}</p>
+          </div>
+        ) : projects.length === 0 ? (
           <div className="rounded-3xl border border-dashed border-border bg-card/70 px-8 py-16 text-center shadow-sm">
             <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-muted text-muted-foreground">
               <Trash2 className="h-7 w-7" />
