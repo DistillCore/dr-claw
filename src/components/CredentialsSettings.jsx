@@ -196,6 +196,8 @@ function CredentialsSettings() {
   };
 
   const toggleGeminiCredential = async (credentialId, isActive) => {
+    if (typeof isActive !== 'boolean') return;
+
     try {
       await authenticatedFetch(`/api/settings/credentials/${credentialId}/toggle`, {
         method: 'PATCH',

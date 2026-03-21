@@ -3,13 +3,14 @@ import crypto from 'crypto';
 import path from 'path';
 import { promises as fs } from 'fs';
 
-import { appSettingsDb, autoResearchDb, userDb, credentialsDb } from '../database/db.js';
+import { appSettingsDb, autoResearchDb, userDb } from '../database/db.js';
 import { extractProjectDirectory } from '../projects.js';
 import { CLAUDE_MODELS, CODEX_MODELS, GEMINI_MODELS } from '../../shared/modelConstants.js';
 import { queryClaudeSDK, abortClaudeSDKSession, isClaudeSDKSessionActive } from '../claude-sdk.js';
 import { queryCodex, abortCodexSession, isCodexSessionActive } from '../openai-codex.js';
 import { spawnGemini, abortGeminiSession, isGeminiSessionActive } from '../gemini-cli.js';
 import { sendAutoResearchCompletionEmail } from '../utils/auto-research-mailer.js';
+import { getGeminiApiKeyForUser, withGeminiApiKeyEnv } from '../utils/geminiApiKey.js';
 
 const router = express.Router();
 
@@ -290,17 +291,8 @@ async function runAutoResearch(runId, userId, projectName, projectPath) {
   }
 
   try {
-    // Inject Gemini API key from DB if not already set
-    if (!process.env.GEMINI_API_KEY && userId) {
-      try {
-        const geminiKey = credentialsDb.getActiveCredential(userId, 'gemini_api_key');
-        if (geminiKey) {
-          process.env.GEMINI_API_KEY = geminiKey;
-        }
-      } catch (err) {
-        console.error('[WARN] Failed to load Gemini API key from DB:', err.message);
-      }
-    }
+    const geminiApiKey = getGeminiApiKeyForUser(userId);
+    const sessionEnv = withGeminiApiKeyEnv(process.env, geminiApiKey);
 
     let pipelineState = await readPipelineState(projectPath);
     autoResearchDb.updateRun(runId, {
@@ -343,6 +335,7 @@ async function runAutoResearch(runId, userId, projectName, projectPath) {
             cwd: projectPath,
             projectPath,
             sessionId: runState.sessionId,
+            env: sessionEnv,
             model,
             permissionMode,
           }, writer)
@@ -351,6 +344,7 @@ async function runAutoResearch(runId, userId, projectName, projectPath) {
               cwd: projectPath,
               projectPath,
               sessionId: runState.sessionId,
+              env: sessionEnv,
               model,
               permissionMode,
             }, writer)
@@ -358,6 +352,7 @@ async function runAutoResearch(runId, userId, projectName, projectPath) {
               cwd: projectPath,
               projectPath,
               sessionId: runState.sessionId,
+              env: sessionEnv,
               permissionMode,
             }, writer),
         TASK_TIMEOUT_MS,

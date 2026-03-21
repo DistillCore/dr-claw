@@ -68,11 +68,12 @@ import telemetryRoutes from './routes/telemetry.js';
 import computeRoutes from './routes/compute.js';
 import newsRoutes from './routes/news.js';
 import autoResearchRoutes from './routes/auto-research.js';
-import { initializeDatabase, credentialsDb } from './database/db.js';
+import { initializeDatabase } from './database/db.js';
 import { validateApiKey, authenticateToken, authenticateWebSocket } from './middleware/auth.js';
 import { IS_PLATFORM } from './constants/config.js';
 import { enqueueTelemetryEvent } from './telemetry.js';
 import { resolveCursorCliCommand, isCursorLoginCommand, isGeminiLoginCommand, normalizeCursorLoginCommand } from './utils/cursorCommand.js';
+import { getGeminiApiKeyForUser, withGeminiApiKeyEnv } from './utils/geminiApiKey.js';
 
 // File system watchers for provider project/session folders
 const PROVIDER_WATCH_PATHS = [
@@ -1267,19 +1268,8 @@ function handleChatConnection(ws, request) {
         telemetryEnabled: true,
     };
 
-    // Inject Gemini API key from DB into process.env if not already set
-    const injectGeminiApiKey = () => {
-        if (!process.env.GEMINI_API_KEY && userId) {
-            try {
-                const key = credentialsDb.getActiveCredential(userId, 'gemini_api_key');
-                if (key) {
-                    process.env.GEMINI_API_KEY = key;
-                }
-            } catch (err) {
-                console.error('[WARN] Failed to load Gemini API key from DB:', err.message);
-            }
-        }
-    };
+    const geminiApiKey = getGeminiApiKeyForUser(userId);
+    const sessionEnv = withGeminiApiKeyEnv(process.env, geminiApiKey);
 
     // Wrap WebSocket with writer for consistent interface with SSEStreamWriter
     const writer = new WebSocketWriter(ws, telemetryContext);
@@ -1314,8 +1304,7 @@ function handleChatConnection(ws, request) {
                 writer.telemetryContext = { ...telemetryContext, provider: 'claude', telemetryEnabled: commandTelemetryEnabled };
 
                 // Use Claude Agents SDK
-                injectGeminiApiKey();
-                await queryClaudeSDK(data.command, data.options, writer);
+                await queryClaudeSDK(data.command, { ...data.options, env: sessionEnv }, writer);
             } else if (data.type === 'cursor-command') {
                 console.log('[DEBUG] Cursor message:', data.command || '[Continue/Resume]');
                 console.log('📁 Project:', data.options?.cwd || 'Unknown');
@@ -1334,8 +1323,7 @@ function handleChatConnection(ws, request) {
                     { ...telemetryContext, telemetryEnabled: commandTelemetryEnabled },
                 );
                 writer.telemetryContext = { ...telemetryContext, provider: 'cursor', telemetryEnabled: commandTelemetryEnabled };
-                injectGeminiApiKey();
-                await spawnCursor(data.command, data.options, writer);
+                await spawnCursor(data.command, { ...data.options, env: sessionEnv }, writer);
             } else if (data.type === 'codex-command') {
                 console.log('[DEBUG] Codex message:', data.command || '[Continue/Resume]');
                 console.log('📁 Project:', data.options?.projectPath || data.options?.cwd || 'Unknown');
@@ -1354,8 +1342,7 @@ function handleChatConnection(ws, request) {
                     { ...telemetryContext, telemetryEnabled: commandTelemetryEnabled },
                 );
                 writer.telemetryContext = { ...telemetryContext, provider: 'codex', telemetryEnabled: commandTelemetryEnabled };
-                injectGeminiApiKey();
-                await queryCodex(data.command, data.options, writer);
+                await queryCodex(data.command, { ...data.options, env: sessionEnv }, writer);
             } else if (data.type === 'gemini-command') {
                 console.log('[DEBUG] Gemini message:', data.command || '[Continue/Resume]');
                 console.log('📁 Project:', data.options?.projectPath || data.options?.cwd || 'Unknown');
@@ -1374,15 +1361,15 @@ function handleChatConnection(ws, request) {
                     { ...telemetryContext, telemetryEnabled: commandTelemetryEnabled },
                 );
                 writer.telemetryContext = { ...telemetryContext, provider: 'gemini', telemetryEnabled: commandTelemetryEnabled };
-                injectGeminiApiKey();
-                await spawnGemini(data.command, data.options, writer);
+                await spawnGemini(data.command, { ...data.options, env: sessionEnv }, writer);
             } else if (data.type === 'cursor-resume') {
                 // Backward compatibility: treat as cursor-command with resume and no prompt
                 console.log('[DEBUG] Cursor resume session (compat):', data.sessionId);
                 await spawnCursor('', {
                     sessionId: data.sessionId,
                     resume: true,
-                    cwd: data.options?.cwd
+                    cwd: data.options?.cwd,
+                    env: sessionEnv
                 }, writer);
             } else if (data.type === 'abort-session') {
                 console.log('[DEBUG] Abort session request:', data.sessionId);

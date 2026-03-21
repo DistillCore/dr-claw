@@ -4,7 +4,7 @@ import path from 'path';
 import os from 'os';
 import { promises as fs } from 'fs';
 import crypto from 'crypto';
-import { userDb, apiKeysDb, githubTokensDb, credentialsDb } from '../database/db.js';
+import { userDb, apiKeysDb, githubTokensDb } from '../database/db.js';
 import { addProjectManually } from '../projects.js';
 import { queryClaudeSDK } from '../claude-sdk.js';
 import { spawnCursor } from '../cursor-cli.js';
@@ -13,6 +13,7 @@ import { spawnGemini } from '../gemini-cli.js';
 import { Octokit } from '@octokit/rest';
 import { CLAUDE_MODELS, CURSOR_MODELS, CODEX_MODELS, GEMINI_MODELS } from '../../shared/modelConstants.js';
 import { IS_PLATFORM } from '../constants/config.js';
+import { getGeminiApiKeyForUser, withGeminiApiKeyEnv } from '../utils/geminiApiKey.js';
 
 const router = express.Router();
 
@@ -940,17 +941,8 @@ router.post('/', validateExternalApiKey, async (req, res) => {
       });
     }
 
-    // Inject Gemini API key from DB if not already set
-    if (!process.env.GEMINI_API_KEY && req.user?.id) {
-      try {
-        const geminiKey = credentialsDb.getActiveCredential(req.user.id, 'gemini_api_key');
-        if (geminiKey) {
-          process.env.GEMINI_API_KEY = geminiKey;
-        }
-      } catch (err) {
-        console.error('[WARN] Failed to load Gemini API key from DB:', err.message);
-      }
-    }
+    const geminiApiKey = getGeminiApiKeyForUser(req.user?.id);
+    const sessionEnv = withGeminiApiKeyEnv(process.env, geminiApiKey);
 
     // Start the appropriate session
     if (provider === 'claude') {
@@ -961,6 +953,7 @@ router.post('/', validateExternalApiKey, async (req, res) => {
         cwd: finalProjectPath,
         sessionId: null, // New session
         model: model,
+        env: sessionEnv,
         permissionMode: 'bypassPermissions' // Bypass all permissions for API calls
       }, writer);
 
@@ -972,6 +965,7 @@ router.post('/', validateExternalApiKey, async (req, res) => {
         cwd: finalProjectPath,
         sessionId: null, // New session
         model: model || undefined,
+        env: sessionEnv,
         skipPermissions: true // Bypass permissions for Cursor
       }, writer);
     } else if (provider === 'codex') {
@@ -982,6 +976,7 @@ router.post('/', validateExternalApiKey, async (req, res) => {
         cwd: finalProjectPath,
         sessionId: null,
         model: model || CODEX_MODELS.DEFAULT,
+        env: sessionEnv,
         permissionMode: 'bypassPermissions'
       }, writer);
     } else if (provider === 'gemini') {
@@ -991,6 +986,7 @@ router.post('/', validateExternalApiKey, async (req, res) => {
         projectPath: finalProjectPath,
         cwd: finalProjectPath,
         sessionId: null,
+        env: sessionEnv,
         model: model || GEMINI_MODELS.DEFAULT
       }, writer);
     }

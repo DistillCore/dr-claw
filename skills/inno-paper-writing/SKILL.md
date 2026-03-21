@@ -200,11 +200,11 @@ Apply these writing conventions from scholarly research:
    - Confirm abstract matches content
    - Validate citation completeness
 
-### 7. Citation Verification (Post-Writing)
+### 7. Citation Verification Reminder (Post-Writing)
 
-After the paper draft is complete (all sections written, references listed), run citation verification before finalizing:
+After the paper draft is complete (all sections written, references listed), remind the user that citation verification is strongly recommended before finalizing:
 
-1. **Read and execute** the `inno-reference-audit` skill: read `.claude/skills/inno-reference-audit/SKILL.md` and follow its procedure.
+1. **Suggest the `inno-reference-audit` skill** from the skill library: read `skills/inno-reference-audit/SKILL.md` and follow its procedure when the user wants reference verification.
 2. **Verify every reference** in the bibliography using WebSearch:
    - Search for the exact paper title, authors, and publication venue
    - Confirm the year, volume/issue, page numbers, and DOI match
@@ -214,10 +214,10 @@ After the paper draft is complete (all sections written, references listed), run
    - Replace the fabricated reference with the real one (title, authors, year, venue, DOI)
    - Rewrite the citing sentence if needed to accurately reflect what the real paper says
    - If no supporting paper can be found after thorough searching, remove the claim from the text entirely or rephrase it as a general observation without a citation
-4. **Iterate until clean**: repeat verification on any newly added references. The final paper must contain **zero unverified references**.
+4. **Iterate until clean**: repeat verification on any newly added references until the user is satisfied with the verification pass.
 5. **Report results** to the user: list which references were verified on first pass, which were replaced, and which claims were removed.
 
-This step is mandatory — do not skip it. A paper must not be delivered with any unverified or fabricated references.
+This step is recommended whenever references were added or revised. If the user skips verification, explicitly note that citations have not been audited.
 
 ## Examples
 
