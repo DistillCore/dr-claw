@@ -1092,9 +1092,24 @@ async function parseJsonlSessions(filePath, projectName = null, dbSessionMap = n
                 textContent === 'Warmup' // Explicitly filter out "Warmup"
               );
 
-              if (textContent && textContent.length > 0 && !isSystemMessage) {
+              if (textContent && textContent.length > 0) {
                 const cleaned = stripInternalContextPrefix(textContent, false);
-                if (cleaned) {
+                
+                const isSystemMessage = typeof cleaned === 'string' && (
+                  cleaned.startsWith('<command-name>') ||
+                  cleaned.startsWith('<command-message>') ||
+                  cleaned.startsWith('<command-args>') ||
+                  cleaned.startsWith('<local-command-stdout>') ||
+                  cleaned.startsWith('<system-reminder>') ||
+                  cleaned.startsWith('Caveat:') ||
+                  cleaned.startsWith('This session is being continued from a previous') ||
+                  cleaned.startsWith('Invalid API key') ||
+                  cleaned.includes('{"subtasks":') || // Filter Task Master prompts
+                  cleaned.includes('CRITICAL: You MUST respond with ONLY a JSON') || // Filter Task Master system prompts
+                  cleaned === 'Warmup' // Explicitly filter out "Warmup"
+                );
+
+                if (cleaned && !isSystemMessage) {
                   // If this is the very first message (no parent), use it as initial summary
                   if (entry.parentUuid === null && session.summary === 'New Session') {
                     session.summary = cleaned.length > 50 ? cleaned.substring(0, 50) + '...' : cleaned;
@@ -1120,16 +1135,17 @@ async function parseJsonlSessions(filePath, projectName = null, dbSessionMap = n
                   assistantText = entry.message.content;
                 }
 
-                // Additional filter for assistant messages with system content
-                const isSystemAssistantMessage = typeof assistantText === 'string' && (
-                  assistantText.startsWith('Invalid API key') ||
-                  assistantText.includes('{"subtasks":') ||
-                  assistantText.includes('CRITICAL: You MUST respond with ONLY a JSON')
-                );
-
-                if (assistantText && !isSystemAssistantMessage) {
+                if (assistantText) {
                   const cleaned = stripInternalContextPrefix(assistantText, false);
-                  if (cleaned) {
+
+                  // Additional filter for assistant messages with system content
+                  const isSystemAssistantMessage = typeof cleaned === 'string' && (
+                    cleaned.startsWith('Invalid API key') ||
+                    cleaned.includes('{"subtasks":') ||
+                    cleaned.includes('CRITICAL: You MUST respond with ONLY a JSON')
+                  );
+
+                  if (cleaned && !isSystemAssistantMessage) {
                     session.lastAssistantMessage = cleaned;
                   }
                 }

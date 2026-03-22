@@ -1,5 +1,6 @@
 import type { TFunction } from 'i18next';
 import type { Project } from '../../../types/app';
+import { stripInternalContextPrefix } from '../../../utils/sessionFormatting';
 import type {
   AdditionalSessionsByProject,
   ProjectSortOrder,
@@ -49,36 +50,6 @@ export const getSessionDate = (session: SessionWithProvider): Date => {
   }
 
   return new Date(session.lastActivity || 0);
-};
-
-const stripInternalContextPrefix = (value: string, returnDefaultOnEmpty = true): string | null => {
-  if (typeof value !== 'string') return returnDefaultOnEmpty ? '' : null;
-  let cleaned = value;
-  let hasMatch = false;
-  
-  // 1. Match full [Context: ...] prefixes at the start of the string, including multiple ones
-  const fullPrefixPattern = /^\s*\[Context:[^\]]*\]\s*/i;
-  while (fullPrefixPattern.test(cleaned)) {
-    cleaned = cleaned.replace(fullPrefixPattern, '');
-    hasMatch = true;
-  }
-  
-  // 2. Match common truncated prefixes like "[Context: session-mode=..." or "[Context: Tre..."
-  const truncatedPrefixPattern = /^\s*\[Context:[^\]]*$/i;
-  if (truncatedPrefixPattern.test(cleaned)) {
-    return returnDefaultOnEmpty ? 'New Session' : null;
-  }
-
-  const result = cleaned.trim();
-  if (!hasMatch && result) {
-    return result;
-  }
-
-  if (!result) {
-    return returnDefaultOnEmpty ? 'New Session' : null;
-  }
-
-  return result;
 };
 
 export const getSessionName = (session: SessionWithProvider, t: TFunction): string => {

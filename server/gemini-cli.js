@@ -112,13 +112,13 @@ function isAllowedBeforeTodos(rawToolName) {
 
 function sanitizePersistedGeminiContent(content) {
   if (typeof content === 'string') {
-    return stripInternalContextPrefix(content);
+    return stripInternalContextPrefix(content, false);
   }
 
   if (Array.isArray(content)) {
     return content.map((part) => {
       if (part && typeof part === 'object' && typeof part.text === 'string') {
-        return { ...part, text: stripInternalContextPrefix(part.text) };
+        return { ...part, text: stripInternalContextPrefix(part.text, false) };
       }
       return part;
     });

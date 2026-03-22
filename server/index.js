@@ -1312,11 +1312,6 @@ function handleChatConnection(ws, request) {
                 
                 queryClaudeSDK(data.command, { ...data.options, env: sessionEnv }, writer).catch(error => {
                     console.error('[ERROR] Claude query error:', error);
-                    writer.send({
-                        type: 'claude-error',
-                        error: error.message,
-                        sessionId: sessionId || null
-                    });
                 });
             } else if (data.type === 'cursor-command') {
                 console.log('[DEBUG] Cursor message:', data.command || '[Continue/Resume]');
@@ -1346,11 +1341,6 @@ function handleChatConnection(ws, request) {
                 
                 spawnCursor(data.command, { ...data.options, env: sessionEnv }, writer).catch(error => {
                     console.error('[ERROR] Cursor spawn error:', error);
-                    writer.send({
-                        type: 'cursor-error',
-                        error: error.message,
-                        sessionId: sessionId || null
-                    });
                 });
             } else if (data.type === 'codex-command') {
                 console.log('[DEBUG] Codex message:', data.command || '[Continue/Resume]');
@@ -1380,11 +1370,6 @@ function handleChatConnection(ws, request) {
                 
                 queryCodex(data.command, { ...data.options, env: sessionEnv }, writer).catch(error => {
                     console.error('[ERROR] Codex query error:', error);
-                    writer.send({
-                        type: 'codex-error',
-                        error: error.message,
-                        sessionId: sessionId || null
-                    });
                 });
             } else if (data.type === 'gemini-command') {
                 console.log('[DEBUG] Gemini message:', data.command || '[Continue/Resume]');
@@ -1414,11 +1399,6 @@ function handleChatConnection(ws, request) {
                 
                 spawnGemini(data.command, { ...data.options, env: sessionEnv }, writer).catch(error => {
                     console.error('[ERROR] Gemini spawn error:', error);
-                    writer.send({
-                        type: 'gemini-error',
-                        error: error.message,
-                        sessionId: sessionId || null
-                    });
                 });
             } else if (data.type === 'cursor-resume') {
                 // Backward compatibility: treat as cursor-command with resume and no prompt
@@ -1437,11 +1417,6 @@ function handleChatConnection(ws, request) {
                     env: sessionEnv
                 }, writer).catch(error => {
                     console.error('[ERROR] Cursor resume error:', error);
-                    writer.send({
-                        type: 'cursor-error',
-                        error: error.message,
-                        sessionId: sessionId || null
-                    });
                 });
             } else if (data.type === 'abort-session') {
                 console.log('[DEBUG] Abort session request:', data.sessionId);

@@ -1,5 +1,6 @@
 import type { ChatMessage } from '../types/types';
 import { decodeHtmlEntities, unescapeWithMathProtection } from './chatFormatting';
+import { stripInternalContextPrefix } from '../../../utils/sessionFormatting';
 
 export interface DiffLine {
   type: 'added' | 'removed';
@@ -62,25 +63,6 @@ const normalizeToolInput = (value: unknown): string => {
   } catch {
     return String(value);
   }
-};
-
-const stripInternalContextPrefix = (value: string): string => {
-  if (typeof value !== 'string') return '';
-  let cleaned = value;
-  
-  // 1. Match full [Context: ...] prefixes at the start of the string, including multiple ones
-  const fullPrefixPattern = /^\s*\[Context:[^\]]*\]\s*/i;
-  while (fullPrefixPattern.test(cleaned)) {
-    cleaned = cleaned.replace(fullPrefixPattern, '');
-  }
-  
-  // 2. Match common truncated prefixes like "[Context: session-mode=..." or "[Context: Tre..."
-  const truncatedPrefixPattern = /^\s*\[Context:[^\]]*$/i;
-  if (truncatedPrefixPattern.test(cleaned)) {
-    return 'New Session';
-  }
-
-  return cleaned.trim();
 };
 
 const toAbsolutePath = (projectPath: string, filePath?: string) => {
@@ -459,7 +441,7 @@ export const convertSessionMessages = (rawMessages: any[]): ChatMessage[] => {
       } else {
         text = decodeHtmlEntities(String(content));
       }
-      text = stripInternalContextPrefix(text);
+      text = stripInternalContextPrefix(text) || '';
 
       // Check if this user message also contains tool_result parts
       const hasToolResults = Array.isArray(content) &&

@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next';
 import SessionProviderLogo from '../../../SessionProviderLogo';
 import type { AppTab, Project, ProjectSession } from '../../../../types/app';
+import { stripInternalContextPrefix } from '../../../../utils/sessionFormatting';
 
 type MainContentTitleProps = {
   activeTab: AppTab;
@@ -43,36 +44,6 @@ function getTabTitle(activeTab: AppTab, shouldShowTasksTab: boolean, t: (key: st
   }
 
   return 'Project';
-}
-
-function stripInternalContextPrefix(value: string, returnDefaultOnEmpty = true): string | null {
-  if (typeof value !== 'string') return returnDefaultOnEmpty ? '' : null;
-  let cleaned = value;
-  let hasMatch = false;
-  
-  // 1. Match full [Context: ...] prefixes at the start of the string, including multiple ones
-  const fullPrefixPattern = /^\s*\[Context:[^\]]*\]\s*/i;
-  while (fullPrefixPattern.test(cleaned)) {
-    cleaned = cleaned.replace(fullPrefixPattern, '');
-    hasMatch = true;
-  }
-  
-  // 2. Match common truncated prefixes like "[Context: session-mode=..." or "[Context: Tre..."
-  const truncatedPrefixPattern = /^\s*\[Context:[^\]]*$/i;
-  if (truncatedPrefixPattern.test(cleaned)) {
-    return returnDefaultOnEmpty ? 'New Session' : null;
-  }
-
-  const result = cleaned.trim();
-  if (!hasMatch && result) {
-    return result;
-  }
-
-  if (!result) {
-    return returnDefaultOnEmpty ? 'New Session' : null;
-  }
-
-  return result;
 }
 
 function getSessionTitle(session: ProjectSession): string {
