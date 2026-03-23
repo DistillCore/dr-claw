@@ -235,6 +235,111 @@ async function bootstrapProjectsIndexFromLegacySources(config, projectDb, userId
   return seededCount;
 }
 
+function collectCodexProjectCandidates(sessionsByProject = new Map()) {
+  const candidatesByProject = new Map();
+
+  for (const sessions of sessionsByProject.values()) {
+    if (!Array.isArray(sessions) || sessions.length === 0) {
+      continue;
+    }
+
+    const projectPath = sessions.find((session) => typeof session?.cwd === 'string' && session.cwd.trim())?.cwd?.trim();
+    if (!projectPath) {
+      continue;
+    }
+
+    const projectName = encodeProjectPath(projectPath);
+    if (!projectName) {
+      continue;
+    }
+
+    if (!candidatesByProject.has(projectName)) {
+      candidatesByProject.set(projectName, {
+        projectName,
+        projectPath,
+        sessions: [],
+      });
+    }
+
+    const candidate = candidatesByProject.get(projectName);
+    const sessionIds = new Set(candidate.sessions.map((session) => session.id));
+
+    for (const session of sessions) {
+      if (!session?.id || sessionIds.has(session.id)) {
+        continue;
+      }
+
+      candidate.sessions.push(session);
+      sessionIds.add(session.id);
+    }
+  }
+
+  return Array.from(candidatesByProject.values());
+}
+
+async function syncDiscoveredProjectsFromCodexSessions(config, projectDb, userId = null, visibleWorkspaceRoots = []) {
+  const { sessionDb } = await import('./database/db.js');
+  const discoveredSessions = await buildCodexSessionsIndex();
+  const candidates = collectCodexProjectCandidates(discoveredSessions);
+  let syncedProjects = 0;
+
+  for (const candidate of candidates) {
+    const { projectName, projectPath, sessions } = candidate;
+
+    if (!projectPath || !await pathExists(projectPath)) {
+      continue;
+    }
+
+    if (visibleWorkspaceRoots.length > 0 && !await isPathWithinWorkspaceRoots(projectPath, visibleWorkspaceRoots)) {
+      continue;
+    }
+
+    const projectInfo = config[projectName];
+    const existing = projectDb.getProjectById(projectName);
+    if (isProjectSuppressed(projectName, config, projectInfo) || isProjectTrashed(projectInfo, existing)) {
+      continue;
+    }
+
+    const ownerUserId = existing?.user_id ?? getProjectOwnerUserId(projectInfo, existing) ?? userId ?? null;
+    const metadata = { ...(existing?.metadata || {}) };
+
+    if (projectInfo?.trash?.trashedAt) {
+      metadata.trash = {
+        ...projectInfo.trash,
+        ownerUserId: projectInfo.trash.ownerUserId ?? ownerUserId,
+      };
+    }
+
+    projectDb.upsertProject(
+      projectName,
+      ownerUserId,
+      existing?.display_name || projectInfo?.displayName || null,
+      projectPath,
+      existing?.is_starred || 0,
+      existing?.last_accessed || null,
+      Object.keys(metadata).length > 0 ? metadata : null,
+    );
+
+    for (const session of sessions) {
+      sessionDb.upsertSessionFromSource(session.id, projectName, 'codex', {
+        displayName: session.summary || session.name || 'Codex Session',
+        lastActivity: session.lastActivity || new Date(),
+        messageCount: session.messageCount || 0,
+        createdAt: session.createdAt || session.lastActivity || new Date(),
+        metadata: {
+          projectPath,
+          sessionMode: normalizeSessionMode(session.mode),
+          indexState: 'synced',
+        },
+      });
+    }
+
+    syncedProjects += 1;
+  }
+
+  return syncedProjects;
+}
+
 function buildTrashEntry(projectName, projectInfo = null, dbEntry = null) {
   const trashMeta = dbEntry?.metadata?.trash || projectInfo?.trash;
   if (!trashMeta?.trashedAt) {
@@ -1068,16 +1173,15 @@ async function getProjects(userId, progressCallback = null) {
 
   let dbProjects = projectDb.getAllProjects(userId || null);
   if (dbProjects.length === 0) {
-    const seededCount = await bootstrapProjectsIndexFromLegacySources(
+    await bootstrapProjectsIndexFromLegacySources(
       config,
       projectDb,
       userId || null,
       visibleWorkspaceRoots,
     );
-    if (seededCount > 0) {
-      dbProjects = projectDb.getAllProjects(userId || null);
-    }
   }
+  await syncDiscoveredProjectsFromCodexSessions(config, projectDb, userId || null, visibleWorkspaceRoots);
+  dbProjects = projectDb.getAllProjects(userId || null);
 
   try {
     const visibleProjects = [];
@@ -3561,6 +3665,7 @@ export {
   getTrashedProjects,
   getSessions,
   getSessionMessages,
+  collectCodexProjectCandidates,
   parseJsonlSessions,
   renameProject,
   renameSession,
