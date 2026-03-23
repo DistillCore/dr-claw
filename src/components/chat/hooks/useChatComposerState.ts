@@ -746,6 +746,7 @@ export function useChatComposerState({
           await executeCommand(matchedCommand, trimmedInput);
           setInput('');
           inputValueRef.current = '';
+          setAttachedPrompt(null);
           setAttachedFiles([]);
           setUploadingFiles(new Map());
           setFileErrors(new Map());

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { ChevronDown, ChevronUp, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { AttachedPrompt } from '../../types/types';
@@ -14,10 +14,22 @@ export default function PromptBadgeDropdown({ prompt, onRemove, onUpdate }: Prom
   const [isOpen, setIsOpen] = useState(false);
   const [editText, setEditText] = useState(prompt.promptText);
 
-  // Sync editText when prompt changes
+  // Sync editText only when switching to a different scenario
   useEffect(() => {
     setEditText(prompt.promptText);
-  }, [prompt.promptText]);
+  }, [prompt.scenarioId]);
+
+  const handleBlur = useCallback(() => {
+    if (editText !== prompt.promptText) {
+      onUpdate(editText);
+    }
+  }, [editText, prompt.promptText, onUpdate]);
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      setIsOpen(false);
+    }
+  }, []);
 
   return (
     <div className="px-3 pt-2.5 pb-1">
@@ -29,6 +41,8 @@ export default function PromptBadgeDropdown({ prompt, onRemove, onUpdate }: Prom
           type="button"
           onClick={() => setIsOpen(!isOpen)}
           className="ml-0.5 p-0.5 hover:bg-primary/10 rounded transition-colors"
+          aria-expanded={isOpen}
+          aria-controls="prompt-edit-area"
           title={isOpen ? t('attachedPrompt.hidePrompt') : t('attachedPrompt.showPrompt')}
         >
           {isOpen ? (
@@ -49,13 +63,12 @@ export default function PromptBadgeDropdown({ prompt, onRemove, onUpdate }: Prom
 
       {/* Dropdown editable area */}
       {isOpen && (
-        <div className="mt-2 mb-1">
+        <div className="mt-2 mb-1" id="prompt-edit-area">
           <textarea
             value={editText}
-            onChange={(e) => {
-              setEditText(e.target.value);
-              onUpdate(e.target.value);
-            }}
+            onChange={(e) => setEditText(e.target.value)}
+            onBlur={handleBlur}
+            onKeyDown={handleKeyDown}
             className="w-full p-2.5 text-sm bg-muted/30 border border-border/40 rounded-lg resize-none focus:outline-none focus:ring-1 focus:ring-primary/20 text-foreground/80 min-h-[60px] max-h-[120px]"
             rows={3}
           />

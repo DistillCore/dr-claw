@@ -181,16 +181,18 @@ const MessageComponent = memo(({ message, index, prevMessage, createDiff, onFile
           )}
           <div className="bg-blue-600 text-white rounded-2xl rounded-tr-none px-4 py-2.5 shadow-sm max-w-[90%] sm:max-w-[85%]">
             {message.attachedPrompt && (
-              <div className="mb-1.5">
+              <div className={message.content?.trim() ? 'mb-1.5' : ''}>
                 <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-blue-500/20 text-blue-100 text-xs font-medium">
                   <span>{message.attachedPrompt.scenarioIcon}</span>
                   {message.attachedPrompt.scenarioTitle}
                 </span>
               </div>
             )}
-            <div className="text-[15px] whitespace-pre-wrap break-words leading-relaxed">
-              {message.content}
-            </div>
+            {message.content?.trim() && (
+              <div className="text-[15px] whitespace-pre-wrap break-words leading-relaxed">
+                {message.content}
+              </div>
+            )}
             {message.images && message.images.length > 0 && (
               <div className="mt-2 grid grid-cols-2 gap-2">
                 {message.images.map((img, idx) => {
