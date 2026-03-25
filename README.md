@@ -118,7 +118,7 @@ Dr. Claw is a general-purpose AI research assistant designed to help researchers
 
 Cursor agent support is in progress and coming soon.
 
-### Installation
+### Installation 
 
 1. **Clone the repository:**
 ```bash
@@ -140,14 +140,53 @@ cp .env.example .env
 Need custom ports, auth, or workspace settings? See [docs/configuration.md](docs/configuration.md).
 
 4. **Start the application:**
+
 ```bash
 # Development mode (with hot reload)
 npm run dev
 ```
 
-5. **Open your browser** at `http://localhost:5173` (or the port you configured in `.env`)
 
-If agent web search does not work later, see **Troubleshooting Web Search** below.
+5. **Use the application**
+
+There are two ways to interact with Dr. Claw: the **terminal-only** workflow or the **frontend UI**. The terminal approach is more stable and lightweight; the UI provides richer visualization but may encounter occasional bugs.
+
+#### Option A: Terminal Only
+
+Open a **second terminal** (keep `npm run dev` running in the first) and install the `drclaw` CLI harness:
+
+```bash
+pip install -e ./agent-harness
+```
+
+Then log in with the credentials you created during setup:
+
+```bash
+drclaw auth login --username YOUR_USERNAME --password YOUR_PASSWORD
+```
+
+Navigate to the project directory you want to work in and launch your agent (e.g., Claude Code):
+
+```bash
+cd /path/to/your/project
+claude
+```
+
+Skills from `dr-claw/skills/` are automatically symlinked into each project's `.claude/skills/` directory when the project is created, so the agent discovers them without extra configuration. You can also reference any skill manually inside a session:
+
+```
+> Read .claude/skills/inno-experiment-analysis/SKILL.md and follow it to analyze my results.
+```
+
+<p align="center">
+  <img src="public/screenshots/terminal_example.png" alt="Terminal workflow example" width="1000">
+</p>
+
+#### Option B: Frontend UI
+
+Open your browser at `http://localhost:5173` (or the port you configured in `.env`).
+
+If agent web search does not work later, see [Troubleshooting Web Search](#step-4--troubleshooting-web-search) below.
 
 ## OpenClaw Integration
 
