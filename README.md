@@ -146,6 +146,7 @@ Need custom ports, auth, or workspace settings? See [docs/configuration.md](docs
 npm run dev
 ```
 
+Then create your account via the bowser `http://localhost:5173`.
 
 5. **Use the application**
 
