@@ -2525,17 +2525,20 @@ async function addProjectManually(projectPath, displayName = null, userId = null
     throw new Error(`Path does not exist: ${absolutePath}`);
   }
 
-  const projectName = absolutePath.replace(/[\\/:\s~_.]/g, '-');
+  const projectName = encodeProjectPath(absolutePath);
 
   // Check for existing project with the same path (may have legacy encoded ID)
-  const allProjects = projectDb.getAllProjects(userId);
-  const existingByPath = allProjects.find((p) => p.path === absolutePath);
-  if (existingByPath && existingByPath.id !== projectName) {
+  const existingByPath = projectDb.getProjectByPath(absolutePath, userId);
+  if (existingByPath) {
+    if (existingByPath.id !== projectName) {
+      // Legacy ID detected — migrate to new encoding
+      projectDb.migrateProjectIdentity(existingByPath.id, projectName, absolutePath);
+    }
     return {
-      name: existingByPath.id,
+      name: projectName,
       path: absolutePath,
       fullPath: absolutePath,
-      displayName: displayName || existingByPath.display_name || await generateDisplayName(existingByPath.id, absolutePath),
+      displayName: displayName || existingByPath.display_name || await generateDisplayName(projectName, absolutePath),
       isManuallyAdded: Boolean(existingByPath.metadata?.manuallyAdded),
       createdAt: existingByPath.created_at,
       sessions: [],

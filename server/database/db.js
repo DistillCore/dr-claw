@@ -955,6 +955,25 @@ const projectDb = {
     }
   },
 
+  // Get project by its file-system path (uses idx_projects_path index)
+  getProjectByPath: (projectPath, userId = null) => {
+    try {
+      const query = userId
+        ? 'SELECT * FROM projects WHERE path = ? AND user_id = ?'
+        : 'SELECT * FROM projects WHERE path = ?';
+      const row = userId
+        ? db.prepare(query).get(projectPath, userId)
+        : db.prepare(query).get(projectPath);
+      if (row && row.metadata) {
+        row.metadata = JSON.parse(row.metadata);
+      }
+      return row || null;
+    } catch (err) {
+      console.error('Error getting project by path:', err.message);
+      return null;
+    }
+  },
+
   toggleStar: (id, isStarred) => {
     try {
       db.prepare('UPDATE projects SET is_starred = ? WHERE id = ?').run(isStarred ? 1 : 0, id);
