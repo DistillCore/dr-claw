@@ -1037,6 +1037,7 @@ export function useChatComposerState({
             model: codexModel,
             permissionMode: permissionMode === 'plan' ? 'default' : permissionMode,
             attachments: codexAttachmentPayload,
+            images: uploadedImages,
             telemetryEnabled,
             sessionMode: isNewSession ? newSessionMode : selectedSession?.mode,
             stageTagKeys: pendingStageTagKeys,

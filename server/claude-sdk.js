@@ -22,6 +22,7 @@ import { classifyError, classifySDKError } from '../shared/errorClassifier.js';
 import { encodeProjectPath, ensureProjectSkillLinks, reconcileClaudeSessionIndex } from './projects.js';
 import { writeProjectTemplates } from './templates/index.js';
 import { applyStageTagsToSession, recordIndexedSession } from './utils/sessionIndex.js';
+import { buildTempAttachmentFilename } from './utils/imageAttachmentFiles.js';
 
 import { createRequestId, waitForToolApproval, resolveToolApproval as resolvePermApproval, matchesToolPermission } from './utils/permissions.js';
 
@@ -280,9 +281,7 @@ async function handleImages(command, images, cwd) {
       }
 
       const [, , base64Data] = matches;
-      // Prefer original filename if available, fallback to index-based name
-      const originalName = image.name ? image.name.replace(/[^a-zA-Z0-9._-]/g, '_') : null;
-      const filename = originalName || `file_${index}`;
+      const filename = buildTempAttachmentFilename(index, image?.name, matches[1]);
       const filepath = path.join(tempDir, filename);
 
       // Write base64 data to file
