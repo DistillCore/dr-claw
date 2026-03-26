@@ -56,6 +56,8 @@ export default defineConfig(({ command, mode }) => {
       host,
       port: frontendPort,
       strictPort: false,
+      // Allow reverse-proxy / port-mapped hostnames in dev environments.
+      allowedHosts: true,
       proxy: {
         '/api': {
           target: buildProxyTarget('http', proxyHost, backendPort),

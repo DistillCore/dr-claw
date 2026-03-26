@@ -41,7 +41,6 @@ export const FORBIDDEN_PATHS = [
   '/sys',
   '/var',
   '/boot',
-  '/root',
   '/lib',
   '/lib64',
   '/opt',
