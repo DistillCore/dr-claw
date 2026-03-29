@@ -14,8 +14,6 @@ import AssistantThinkingIndicator from './AssistantThinkingIndicator';
 import { getIntrinsicMessageKey } from '../../utils/messageKeys';
 import { groupMessagesIntoTurns } from '../../utils/groupAgentTurns';
 
-const WORKSPACE_QA_GREETING = `Ask about any file, module, or implementation detail in this workspace. I will stay focused on code and project structure unless you explicitly ask to start research planning.`;
-
 interface ChatMessagesPaneProps {
   scrollContainerRef: RefObject<HTMLDivElement>;
   onWheel: () => void;
@@ -230,7 +228,7 @@ export default function ChatMessagesPane({
               </div>
               <div className="w-full pl-0">
                 <Markdown className="prose prose-md max-w-none dark:prose-invert prose-gray text-[15.5px] leading-relaxed">
-                  {WORKSPACE_QA_GREETING}
+                  {t('session.mode.workspaceQaGreeting')}
                 </Markdown>
               </div>
             </div>

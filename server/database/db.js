@@ -878,6 +878,83 @@ const sessionDb = {
     }
   },
 
+  updateSessionMetadata: (id, metadataPatch = {}) => {
+    try {
+      const existing = parseSessionRow(db.prepare('SELECT * FROM session_metadata WHERE id = ?').get(id));
+      if (!existing) {
+        return null;
+      }
+
+      const mergedMetadata = mergeSessionMetadata(existing.metadata, metadataPatch);
+      db.prepare('UPDATE session_metadata SET metadata = ? WHERE id = ?').run(
+        Object.keys(mergedMetadata).length > 0 ? JSON.stringify(mergedMetadata) : null,
+        id,
+      );
+
+      return {
+        ...existing,
+        metadata: Object.keys(mergedMetadata).length > 0 ? mergedMetadata : null,
+      };
+    } catch (err) {
+      console.error('Error updating session metadata:', err.message);
+      return null;
+    }
+  },
+
+  getSessionContextReview: (id) => {
+    try {
+      const session = sessionDb.getSessionById(id);
+      const files = session?.metadata?.contextReview?.files;
+      return files && typeof files === 'object' ? files : {};
+    } catch (err) {
+      console.error('Error getting session context review state:', err.message);
+      return {};
+    }
+  },
+
+  updateSessionContextReview: (id, reviews = {}) => {
+    try {
+      const existingReviews = sessionDb.getSessionContextReview(id);
+      const sanitizedReviews = Object.entries(reviews || {}).reduce((acc, [filePath, value]) => {
+        if (!filePath || typeof filePath !== 'string') {
+          return acc;
+        }
+
+        if (!value || typeof value !== 'object' || Array.isArray(value)) {
+          return acc;
+        }
+
+        const reviewedAt = typeof value.reviewedAt === 'string' ? value.reviewedAt : null;
+        const lastSeenAt = typeof value.lastSeenAt === 'string' ? value.lastSeenAt : null;
+        const lastReviewedSeenAt = typeof value.lastReviewedSeenAt === 'string' ? value.lastReviewedSeenAt : null;
+
+        acc[filePath] = {
+          reviewedAt,
+          lastSeenAt,
+          lastReviewedSeenAt,
+        };
+        return acc;
+      }, {});
+
+      const nextFiles = {
+        ...existingReviews,
+        ...sanitizedReviews,
+      };
+
+      sessionDb.updateSessionMetadata(id, {
+        contextReview: {
+          files: nextFiles,
+          updatedAt: new Date().toISOString(),
+        },
+      });
+
+      return nextFiles;
+    } catch (err) {
+      console.error('Error updating session context review state:', err.message);
+      return {};
+    }
+  },
+
   deleteSession: (id) => {
     try {
       db.prepare('DELETE FROM session_metadata WHERE id = ?').run(id);
