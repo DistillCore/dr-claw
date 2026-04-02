@@ -1,9 +1,26 @@
-import { app, BrowserWindow, dialog, nativeImage, screen, shell } from 'electron';
+import {
+  app,
+  BrowserWindow,
+  clipboard,
+  dialog,
+  ipcMain,
+  Menu,
+  nativeImage,
+  Notification,
+  screen,
+  shell,
+} from 'electron';
+import { execFile } from 'node:child_process';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
+import net from 'node:net';
+import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
-import net from 'node:net';
+import { fileURLToPath } from 'node:url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const productName = 'Dr. Claw';
 const appId = 'io.openlair.drclaw';
@@ -18,6 +35,7 @@ app.setPath('userData', path.join(app.getPath('appData'), productName));
 
 let mainWindow = null;
 let serverProcess = null;
+let serverOrigin = null;
 let quitting = false;
 
 const singleInstanceLock = app.requestSingleInstanceLock();
@@ -25,6 +43,10 @@ if (!singleInstanceLock) {
   app.quit();
   process.exit(0);
 }
+
+// ---------------------------------------------------------------------------
+// Logging
+// ---------------------------------------------------------------------------
 
 function getDesktopLogPath() {
   const baseDir = app.isReady()
@@ -59,6 +81,49 @@ process.on('unhandledRejection', (reason) => {
     stack: reason.stack,
   } : String(reason));
 });
+
+// ---------------------------------------------------------------------------
+// Window state persistence
+// ---------------------------------------------------------------------------
+
+function getWindowStatePath() {
+  return path.join(app.getPath('userData'), 'window-state.json');
+}
+
+function loadWindowState() {
+  try {
+    const raw = fs.readFileSync(getWindowStatePath(), 'utf8');
+    const state = JSON.parse(raw);
+    if (typeof state.width === 'number' && typeof state.height === 'number') {
+      return state;
+    }
+  } catch {
+    // First launch or corrupt file — use defaults.
+  }
+  return null;
+}
+
+function saveWindowState(window) {
+  if (!window || window.isDestroyed()) {
+    return;
+  }
+
+  const bounds = window.getBounds();
+  const state = {
+    ...bounds,
+    isMaximized: window.isMaximized(),
+  };
+
+  try {
+    fs.writeFileSync(getWindowStatePath(), JSON.stringify(state), 'utf8');
+  } catch {
+    // Non-critical — ignore.
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Utility helpers
+// ---------------------------------------------------------------------------
 
 function resolveAppRoot() {
   return app.isPackaged ? process.resourcesPath : process.cwd();
@@ -129,6 +194,10 @@ async function waitForServer(url, timeoutMs = 30000) {
   throw new Error(`Timed out waiting for local server at ${url}${lastError ? `: ${lastError.message}` : ''}`);
 }
 
+// ---------------------------------------------------------------------------
+// Database and workspace paths (with legacy migration)
+// ---------------------------------------------------------------------------
+
 function resolveSharedDatabasePath() {
   const homeDir = app.getPath('home');
   const legacyDir = path.join(homeDir, '.vibelab');
@@ -179,6 +248,10 @@ function resolveSharedWorkspacesRoot() {
 
   return currentRoot;
 }
+
+// ---------------------------------------------------------------------------
+// Server lifecycle
+// ---------------------------------------------------------------------------
 
 function buildServerEnv(appRoot) {
   const userDataDir = app.getPath('userData');
@@ -251,6 +324,10 @@ async function startServer() {
     serverProcess = null;
     logDesktop('Desktop server exited', { code, signal });
 
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('server:status', { running: false, code, signal });
+    }
+
     if (!quitting) {
       dialog.showErrorBox(
         'Dr. Claw server exited',
@@ -264,6 +341,10 @@ async function startServer() {
 
   return `http://${env.HOST}:${env.PORT}`;
 }
+
+// ---------------------------------------------------------------------------
+// Window helpers
+// ---------------------------------------------------------------------------
 
 function isWindowVisibleOnSomeDisplay(bounds) {
   return screen.getAllDisplays().some(({ workArea }) => {
@@ -302,29 +383,366 @@ function ensureWindowVisible(window) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Native application menu
+// ---------------------------------------------------------------------------
+
+function buildAppMenu() {
+  const template = [];
+
+  if (isMac) {
+    template.push({
+      label: productName,
+      submenu: [
+        { role: 'about', label: `About ${productName}` },
+        { type: 'separator' },
+        {
+          label: 'Settings...',
+          accelerator: 'Cmd+,',
+          click: () => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('app:navigate', { action: 'openSettings' });
+            }
+          },
+        },
+        { type: 'separator' },
+        { role: 'services' },
+        { type: 'separator' },
+        { role: 'hide' },
+        { role: 'hideOthers' },
+        { role: 'unhide' },
+        { type: 'separator' },
+        { role: 'quit' },
+      ],
+    });
+  }
+
+  template.push({
+    label: 'File',
+    submenu: [
+      {
+        label: 'New Chat',
+        accelerator: isMac ? 'Cmd+N' : 'Ctrl+N',
+        click: () => {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('app:navigate', { action: 'newChat' });
+          }
+        },
+      },
+      { type: 'separator' },
+      {
+        label: 'Open Workspace...',
+        accelerator: isMac ? 'Cmd+O' : 'Ctrl+O',
+        click: async () => {
+          if (!mainWindow || mainWindow.isDestroyed()) {
+            return;
+          }
+          const result = await dialog.showOpenDialog(mainWindow, {
+            properties: ['openDirectory'],
+            title: 'Open Workspace',
+          });
+          if (!result.canceled && result.filePaths.length > 0) {
+            mainWindow.webContents.send('app:navigate', {
+              action: 'openWorkspace',
+              path: result.filePaths[0],
+            });
+          }
+        },
+      },
+      { type: 'separator' },
+      isMac ? { role: 'close' } : { role: 'quit' },
+    ],
+  });
+
+  template.push({
+    label: 'Edit',
+    submenu: [
+      { role: 'undo' },
+      { role: 'redo' },
+      { type: 'separator' },
+      { role: 'cut' },
+      { role: 'copy' },
+      { role: 'paste' },
+      { role: 'selectAll' },
+    ],
+  });
+
+  template.push({
+    label: 'View',
+    submenu: [
+      { role: 'reload' },
+      { role: 'forceReload' },
+      { role: 'toggleDevTools' },
+      { type: 'separator' },
+      { role: 'resetZoom' },
+      { role: 'zoomIn' },
+      { role: 'zoomOut' },
+      { type: 'separator' },
+      { role: 'togglefullscreen' },
+    ],
+  });
+
+  template.push({
+    label: 'Window',
+    submenu: [
+      { role: 'minimize' },
+      { role: 'zoom' },
+      ...(isMac ? [
+        { type: 'separator' },
+        { role: 'front' },
+        { type: 'separator' },
+        { role: 'window' },
+      ] : [
+        { role: 'close' },
+      ]),
+    ],
+  });
+
+  template.push({
+    label: 'Help',
+    submenu: [
+      {
+        label: 'Dr. Claw Documentation',
+        click: () => {
+          shell.openExternal('https://github.com/OpenLAIR/dr-claw');
+        },
+      },
+      {
+        label: 'Report an Issue',
+        click: () => {
+          shell.openExternal('https://github.com/OpenLAIR/dr-claw/issues');
+        },
+      },
+      { type: 'separator' },
+      {
+        label: 'View Logs',
+        click: () => {
+          shell.showItemInFolder(getDesktopLogPath());
+        },
+      },
+      {
+        label: 'Open Data Directory',
+        click: () => {
+          shell.openPath(app.getPath('userData'));
+        },
+      },
+    ],
+  });
+
+  return Menu.buildFromTemplate(template);
+}
+
+// ---------------------------------------------------------------------------
+// IPC handlers
+// ---------------------------------------------------------------------------
+
+function registerIpcHandlers() {
+  ipcMain.handle('app:getInfo', () => {
+    let pkg = {};
+    try {
+      const pkgPath = path.join(resolveAppRoot(), 'package.json');
+      pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+    } catch {
+      // Ignore — version info not available.
+    }
+
+    return {
+      version: pkg.version || app.getVersion(),
+      name: productName,
+      platform: process.platform,
+      arch: process.arch,
+      isPackaged: app.isPackaged,
+      electronVersion: process.versions.electron,
+      nodeVersion: process.versions.node,
+      chromeVersion: process.versions.chrome,
+      userData: app.getPath('userData'),
+      appRoot: resolveAppRoot(),
+      logsPath: getDesktopLogPath(),
+    };
+  });
+
+  ipcMain.handle('dialog:selectDirectory', async (_event, options = {}) => {
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      return { canceled: true, filePaths: [] };
+    }
+
+    return dialog.showOpenDialog(mainWindow, {
+      title: options.title || 'Select Folder',
+      defaultPath: options.defaultPath || app.getPath('home'),
+      properties: ['openDirectory', 'createDirectory'],
+      buttonLabel: options.buttonLabel || 'Select',
+    });
+  });
+
+  ipcMain.handle('dialog:selectFile', async (_event, options = {}) => {
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      return { canceled: true, filePaths: [] };
+    }
+
+    return dialog.showOpenDialog(mainWindow, {
+      title: options.title || 'Select File',
+      defaultPath: options.defaultPath || app.getPath('home'),
+      properties: ['openFile'],
+      filters: options.filters || [],
+      buttonLabel: options.buttonLabel || 'Select',
+    });
+  });
+
+  ipcMain.handle('shell:showItemInFolder', (_event, fullPath) => {
+    if (typeof fullPath === 'string' && fullPath.length > 0) {
+      shell.showItemInFolder(fullPath);
+    }
+  });
+
+  ipcMain.handle('shell:openExternal', (_event, url) => {
+    if (typeof url === 'string' && (url.startsWith('https://') || url.startsWith('http://'))) {
+      return shell.openExternal(url);
+    }
+  });
+
+  ipcMain.handle('shell:openPath', (_event, fullPath) => {
+    if (typeof fullPath === 'string' && fullPath.length > 0) {
+      return shell.openPath(fullPath);
+    }
+  });
+
+  ipcMain.handle('system:getInfo', () => ({
+    platform: process.platform,
+    arch: process.arch,
+    osVersion: os.release(),
+    hostname: os.hostname(),
+    homedir: os.homedir(),
+    totalMemory: os.totalmem(),
+    freeMemory: os.freemem(),
+    cpus: os.cpus().length,
+    nodeVersion: process.versions.node,
+    electronVersion: process.versions.electron,
+  }));
+
+  ipcMain.handle('system:checkDependencies', async () => {
+    const deps = [
+      { name: 'node', command: 'node', args: ['--version'] },
+      { name: 'npm', command: 'npm', args: ['--version'] },
+      { name: 'git', command: 'git', args: ['--version'] },
+      { name: 'claude', command: 'claude', args: ['--version'] },
+      { name: 'codex', command: 'codex', args: ['--version'] },
+      { name: 'gemini', command: 'gemini', args: ['--version'] },
+    ];
+
+    const results = await Promise.all(
+      deps.map((dep) => new Promise((resolve) => {
+        const bin = process.platform === 'win32' && !dep.command.includes(path.sep)
+          ? `${dep.command}.cmd`
+          : dep.command;
+
+        execFile(bin, dep.args, { timeout: 10000, env: process.env }, (error, stdout) => {
+          resolve({
+            name: dep.name,
+            available: !error,
+            version: error ? null : (stdout || '').trim().split('\n')[0],
+          });
+        });
+      })),
+    );
+
+    return results;
+  });
+
+  ipcMain.handle('window:minimize', () => {
+    mainWindow?.minimize();
+  });
+
+  ipcMain.handle('window:maximize', () => {
+    if (!mainWindow) {
+      return;
+    }
+    if (mainWindow.isMaximized()) {
+      mainWindow.unmaximize();
+    } else {
+      mainWindow.maximize();
+    }
+  });
+
+  ipcMain.handle('window:close', () => {
+    mainWindow?.close();
+  });
+
+  ipcMain.handle('window:isMaximized', () => {
+    return mainWindow?.isMaximized() ?? false;
+  });
+
+  ipcMain.handle('updater:check', () => {
+    // Placeholder — will be wired when electron-updater is added.
+    return { updateAvailable: false };
+  });
+
+  ipcMain.handle('updater:install', () => {
+    // Placeholder — will be wired when electron-updater is added.
+  });
+
+  ipcMain.handle('notification:show', (_event, title, body) => {
+    if (Notification.isSupported()) {
+      const notification = new Notification({ title, body });
+      notification.show();
+      return true;
+    }
+    return false;
+  });
+
+  ipcMain.handle('clipboard:writeText', (_event, text) => {
+    clipboard.writeText(text);
+  });
+
+  ipcMain.handle('clipboard:readText', () => {
+    return clipboard.readText();
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Window creation
+// ---------------------------------------------------------------------------
+
 function createWindow(baseUrl) {
   logDesktop('Creating BrowserWindow', { baseUrl });
 
   const iconPath = path.join(resolveAppRoot(), 'build', 'icon.png');
+  const preloadPath = path.join(__dirname, 'preload.mjs');
 
-  mainWindow = new BrowserWindow({
-    width: 1440,
-    height: 960,
+  const savedState = loadWindowState();
+  const defaultWidth = 1440;
+  const defaultHeight = 960;
+
+  const windowOptions = {
+    width: savedState?.width || defaultWidth,
+    height: savedState?.height || defaultHeight,
     minWidth: 1100,
     minHeight: 760,
     title: productName,
     show: false,
-    center: true,
+    center: !savedState,
     backgroundColor: '#0b1220',
-    autoHideMenuBar: true,
+    autoHideMenuBar: !isMac,
     icon: iconPath,
+    titleBarStyle: 'default',
     webPreferences: {
       contextIsolation: true,
       sandbox: true,
+      preload: preloadPath,
     },
-  });
+  };
 
-  mainWindow.removeMenu();
+  if (savedState?.x != null && savedState?.y != null) {
+    windowOptions.x = savedState.x;
+    windowOptions.y = savedState.y;
+  }
+
+  mainWindow = new BrowserWindow(windowOptions);
+
+  if (savedState?.isMaximized) {
+    mainWindow.maximize();
+  }
+
+  Menu.setApplicationMenu(buildAppMenu());
 
   let revealed = false;
   const revealWindow = (reason) => {
@@ -354,6 +772,20 @@ function createWindow(baseUrl) {
       shell.openExternal(url);
     }
   });
+
+  // Persist window state on move/resize.
+  let saveTimeout = null;
+  const debouncedSave = () => {
+    if (saveTimeout) {
+      clearTimeout(saveTimeout);
+    }
+    saveTimeout = setTimeout(() => {
+      saveWindowState(mainWindow);
+    }, 500);
+  };
+
+  mainWindow.on('resize', debouncedSave);
+  mainWindow.on('move', debouncedSave);
 
   mainWindow.on('closed', () => {
     logDesktop('BrowserWindow closed');
@@ -390,6 +822,10 @@ function createWindow(baseUrl) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Boot
+// ---------------------------------------------------------------------------
+
 async function boot() {
   try {
     const iconPath = path.join(resolveAppRoot(), 'build', 'icon.png');
@@ -400,7 +836,10 @@ async function boot() {
       }
     }
 
+    registerIpcHandlers();
+
     const baseUrl = await startServer();
+    serverOrigin = baseUrl;
     createWindow(baseUrl);
   } catch (error) {
     logDesktop('boot failed', error instanceof Error ? { message: error.message, stack: error.stack } : String(error));
@@ -431,6 +870,10 @@ async function stopServer() {
   });
 }
 
+// ---------------------------------------------------------------------------
+// App lifecycle
+// ---------------------------------------------------------------------------
+
 app.on('second-instance', () => {
   if (!mainWindow) {
     return;
@@ -452,6 +895,9 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   quitting = true;
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    saveWindowState(mainWindow);
+  }
 });
 
 app.on('will-quit', (event) => {

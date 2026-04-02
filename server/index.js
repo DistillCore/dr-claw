@@ -426,11 +426,23 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // Public health check endpoint (no authentication required)
 app.get('/health', (req, res) => {
-  res.json({
+  const isDesktop = process.env.DR_CLAW_DESKTOP === '1';
+  const response = {
     status: 'ok',
     timestamp: new Date().toISOString(),
-    installMode: process.env.DR_CLAW_DESKTOP === '1' ? 'desktop' : installMode
-  });
+    installMode: isDesktop ? 'desktop' : installMode,
+  };
+
+  if (isDesktop) {
+    response.desktop = {
+      platform: process.platform,
+      arch: process.arch,
+      workspacesRoot: process.env.WORKSPACES_ROOT || null,
+      runtimeDir: process.env.DR_CLAW_RUNTIME_DIR || null,
+    };
+  }
+
+  res.json(response);
 });
 
 // Optional API key validation (if configured)

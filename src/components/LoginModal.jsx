@@ -3,6 +3,7 @@ import { ExternalLink, Loader2, RefreshCw, Wrench, X } from 'lucide-react';
 import StandaloneShell from './StandaloneShell';
 import { authenticatedFetch } from '../utils/api';
 import { IS_PLATFORM } from '../constants/config';
+import { useDesktop } from '../hooks/useDesktop';
 
 function LoginModal({
   isOpen,
@@ -17,9 +18,12 @@ function LoginModal({
   cliAvailable = true,
   installHint = null,
   installable = false,
+  installerAvailable = true,
+  installerHint = null,
   docsUrl = null,
   downloadUrl = null,
 }) {
+  const { openExternal: desktopOpenExternal } = useDesktop();
   const [isInstalling, setIsInstalling] = useState(false);
   const [installMessage, setInstallMessage] = useState('');
   const [installOutput, setInstallOutput] = useState('');
@@ -98,7 +102,7 @@ function LoginModal({
       return;
     }
 
-    window.open(url, '_blank', 'noopener,noreferrer');
+    desktopOpenExternal(url);
   };
 
   const handleRefresh = async () => {
@@ -168,7 +172,7 @@ function LoginModal({
             )}
 
             <div className="flex flex-wrap gap-3">
-              {installable && (
+              {installable && installerAvailable && (
                 <button
                   onClick={handleInstall}
                   disabled={isInstalling}
@@ -198,6 +202,12 @@ function LoginModal({
                 </button>
               )}
             </div>
+
+            {installerHint && (
+              <div className="rounded-lg border border-border bg-muted/40 px-4 py-3 text-xs text-muted-foreground whitespace-pre-wrap">
+                {installerHint}
+              </div>
+            )}
           </div>
         </div>
       </div>

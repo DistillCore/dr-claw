@@ -11,6 +11,7 @@ import LoginModal from './LoginModal';
 import { authenticatedFetch, api } from '../utils/api';
 import { isTelemetryEnabled, setTelemetryEnabled } from '../utils/telemetry';
 import { writeCliAvailability } from '../utils/cliAvailability';
+import { useDesktop } from '../hooks/useDesktop';
 
 // New settings components
 import AgentListItem from './settings/AgentListItem';
@@ -25,6 +26,7 @@ const VALID_SETTINGS_TABS = new Set(['agents', 'email', 'appearance', 'git', 'ap
 function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }) {
   const { isDarkMode, toggleDarkMode } = useTheme();
   const { t } = useTranslation('settings');
+  const { isDesktop, selectDirectory, showItemInFolder } = useDesktop();
   const [allowedTools, setAllowedTools] = useState([]);
   const [disallowedTools, setDisallowedTools] = useState([]);
   const [newAllowedTool, setNewAllowedTool] = useState('');
@@ -888,6 +890,9 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }) {
         cliCommand: 'openrouter',
         error: error.message
       }));
+    }
+  };
+
   const refreshProviderStatus = async (provider) => {
     if (provider === 'claude') {
       await checkClaudeAuthStatus();
@@ -1336,8 +1341,6 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }) {
             {/* Appearance Tab */}
             {activeTab === 'appearance' && (
               <div className="space-y-6 md:space-y-8">
-               {activeTab === 'appearance' && (
-  <div className="space-y-6 md:space-y-8">
     {/* Theme Settings */}
     <div className="space-y-4">
       <div className="bg-gray-50 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
@@ -1478,6 +1481,29 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }) {
             placeholder={workspaceRootDefault}
             className="flex-1 text-sm font-mono"
           />
+          {isDesktop && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={async () => {
+                const selected = await selectDirectory({
+                  title: t('appearanceSettings.defaultProjectPath.browseTitle', 'Select Default Project Folder'),
+                  defaultPath: workspaceRoot || workspaceRootDefault || undefined,
+                });
+                if (selected) {
+                  setWorkspaceRoot(selected);
+                  setWorkspaceRootSaved(false);
+                  setWorkspaceRootError('');
+                  saveWorkspaceRoot(selected);
+                }
+              }}
+              className="whitespace-nowrap"
+              title={t('appearanceSettings.defaultProjectPath.browse', 'Browse')}
+            >
+              <FolderOpen className="w-4 h-4 mr-1" />
+              {t('appearanceSettings.defaultProjectPath.browse', 'Browse')}
+            </Button>
+          )}
           <Button
             variant="outline"
             size="sm"
@@ -1653,9 +1679,6 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }) {
         </div>
       </div>
     </div>
-  </div>
-)}
-
               </div>
             )}
 
@@ -2444,6 +2467,20 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }) {
           loginProvider === 'codex' ? codexAuthStatus.installable === true :
           loginProvider === 'gemini' ? geminiAuthStatus.installable === true :
           false
+        }
+        installerAvailable={
+          loginProvider === 'claude' ? claudeAuthStatus.installerAvailable !== false :
+          loginProvider === 'cursor' ? cursorAuthStatus.installerAvailable !== false :
+          loginProvider === 'codex' ? codexAuthStatus.installerAvailable !== false :
+          loginProvider === 'gemini' ? geminiAuthStatus.installerAvailable !== false :
+          true
+        }
+        installerHint={
+          loginProvider === 'claude' ? claudeAuthStatus.installerHint :
+          loginProvider === 'cursor' ? cursorAuthStatus.installerHint :
+          loginProvider === 'codex' ? codexAuthStatus.installerHint :
+          loginProvider === 'gemini' ? geminiAuthStatus.installerHint :
+          null
         }
         docsUrl={
           loginProvider === 'claude' ? claudeAuthStatus.docsUrl :
