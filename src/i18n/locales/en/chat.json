@@ -358,7 +358,8 @@
     "empty": {
       "injectedContext": "No file or directory context has been observed yet.",
       "taskContext": "No task or todo context captured yet.",
-      "reviewQueue": "No generated files found for this session yet."
+      "reviewQueue": "No generated files found for this session yet.",
+      "files": "No files found"
     },
     "preview": {
       "titleFallback": "Preview",

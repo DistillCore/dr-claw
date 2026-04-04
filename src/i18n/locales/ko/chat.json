@@ -358,7 +358,8 @@
     "empty": {
       "injectedContext": "아직 파일 또는 디렉터리 컨텍스트가 관측되지 않았습니다.",
       "taskContext": "아직 작업 또는 Todo 컨텍스트가 수집되지 않았습니다.",
-      "reviewQueue": "이 세션에서 생성된 파일이 아직 없습니다."
+      "reviewQueue": "이 세션에서 생성된 파일이 아직 없습니다.",
+      "files": "파일을 찾을 수 없습니다"
     },
     "preview": {
       "titleFallback": "미리보기",

@@ -601,11 +601,12 @@ export default function ChatContextSidebar({
     window.localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidth));
   }, [sidebarWidth]);
 
-  // Reset file state on project change
+  // Reset file/tab state on project or session change
   useEffect(() => {
     setFileTree([]);
     setExpandedDirs({});
-  }, [projectName]);
+    setSidebarTab('chat');
+  }, [projectName, effectiveSessionId]);
 
   // Fetch file tree when files tab activates
   useEffect(() => {
@@ -724,7 +725,10 @@ export default function ChatContextSidebar({
       {!effectiveCollapsed && sidebarTab === 'chat' ? (
         <div className="border-b border-border/60 px-4 py-3.5">
           <div className="min-w-0">
-            <div className="text-sm font-semibold tracking-tight text-foreground">{t('sessionContext.title')}</div>
+            <div className="flex items-center gap-2">
+              <div className="text-sm font-semibold tracking-tight text-foreground">{t('sessionContext.title')}</div>
+              {isLoadingTrace && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+            </div>
             <div className="mt-1 max-w-[42ch] text-[11px] leading-5 text-muted-foreground">
               {t('sessionContext.description')}
             </div>
@@ -759,7 +763,7 @@ export default function ChatContextSidebar({
             </div>
           ) : fileTree.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-border/60 bg-background/60 px-3 py-3 text-xs text-muted-foreground">
-              {t('sessionContext.empty.files', 'No files found')}
+              {t('sessionContext.empty.files')}
             </div>
           ) : (
             <div className="space-y-0.5">

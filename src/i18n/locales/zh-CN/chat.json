@@ -358,7 +358,8 @@
     "empty": {
       "injectedContext": "当前还没有观察到文件或目录上下文。",
       "taskContext": "当前还没有捕获到任务或待办上下文。",
-      "reviewQueue": "当前会话还没有发现生成文件。"
+      "reviewQueue": "当前会话还没有发现生成文件。",
+      "files": "未找到文件"
     },
     "preview": {
       "titleFallback": "预览",
