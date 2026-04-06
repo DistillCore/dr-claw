@@ -327,6 +327,7 @@
     "description": "Files, tasks, and outputs actually observed in this session trace.",
     "codexNotice": "Codex visibility is partial and depends on the tool events currently exposed by the runtime.",
     "traceError": "Failed to load the full session trace. Showing live in-memory messages only.",
+    "fileTreeError": "Failed to load project files.",
     "stats": {
       "mode": "Mode",
       "provider": "Provider",
@@ -358,7 +359,8 @@
     "empty": {
       "injectedContext": "No file or directory context has been observed yet.",
       "taskContext": "No task or todo context captured yet.",
-      "reviewQueue": "No generated files found for this session yet."
+      "reviewQueue": "No generated files found for this session yet.",
+      "files": "No files found"
     },
     "preview": {
       "titleFallback": "Preview",
