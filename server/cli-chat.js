@@ -41,7 +41,12 @@ function spawnAsync(command, args, options = {}) {
     });
 
     child.stderr.on('data', (data) => {
-      stderr += data.toString();
+      if (stderr.length < maxBuffer) {
+        stderr += data.toString();
+        if (stderr.length > maxBuffer) {
+          stderr = stderr.slice(0, maxBuffer);
+        }
+      }
     });
 
     child.on('error', (error) => {
