@@ -44,7 +44,7 @@ import mime from 'mime-types';
 
 import { getProjects, getTrashedProjects, getSessions, getSessionMessages, renameProject, renameSession, deleteSession, deleteProject, restoreProject, deleteTrashedProject, addProjectManually, extractProjectDirectory, clearProjectDirectoryCache } from './projects.js';
 import { getProjectTokenUsageSummary } from './project-token-usage.js';
-import { queryClaudeSDK, abortClaudeSDKSession, isClaudeSDKSessionActive, getClaudeSDKSessionStartTime, getActiveClaudeSDKSessions, resolveToolApproval } from './claude-sdk.js';
+import { queryClaudeSDK, abortClaudeSDKSession, isClaudeSDKSessionActive, getClaudeSDKSessionStartTime, getActiveClaudeSDKSessions, resolveToolApproval, getContextWindowForModel } from './claude-sdk.js';
 import { spawnCursor, abortCursorSession, isCursorSessionActive, getCursorSessionStartTime, getActiveCursorSessions } from './cursor-cli.js';
 import { queryCodex, abortCodexSession, isCodexSessionActive, getCodexSessionStartTime, getActiveCodexSessions } from './openai-codex.js';
 import { spawnGemini, abortGeminiSession, isGeminiSessionActive, getGeminiSessionStartTime, getActiveGeminiSessions } from './gemini-cli.js';
@@ -2828,41 +2828,11 @@ app.get('/api/projects/:projectName/sessions/:sessionId/token-usage', authentica
       }
     }
 
-    // Determine context window from model name
-    const MODEL_CONTEXT_WINDOWS = {
-      'claude-opus-4-6':     200000,
-      'claude-opus-4-20250918': 200000,
-      'claude-sonnet-4-6':   200000,
-      'claude-sonnet-4-20250514': 200000,
-      'claude-haiku-4-5':    200000,
-      'claude-haiku-4-5-20251001': 200000,
-      'claude-3-5-sonnet':   200000,
-      'claude-3-5-sonnet-20241022': 200000,
-      'claude-3-5-haiku':    200000,
-      'claude-3-5-haiku-20241022': 200000,
-      'claude-3-opus':       200000,
-      'claude-3-opus-20240229': 200000,
-      'claude-3-sonnet':     200000,
-      'claude-3-haiku':      200000,
-    };
+    // Determine context window from model name (model lookup > env var > default)
+    const contextWindow = getContextWindowForModel(modelName);
 
-    // Priority: env var override > model-based lookup > default
-    const parsedContextWindow = parseInt(process.env.CONTEXT_WINDOW, 10);
-    let contextWindow;
-    if (Number.isFinite(parsedContextWindow)) {
-      contextWindow = parsedContextWindow;
-    } else if (modelName) {
-      // Try exact match first, then prefix match
-      contextWindow = MODEL_CONTEXT_WINDOWS[modelName];
-      if (!contextWindow) {
-        const prefix = Object.keys(MODEL_CONTEXT_WINDOWS).find(k => modelName.startsWith(k));
-        contextWindow = prefix ? MODEL_CONTEXT_WINDOWS[prefix] : 200000;
-      }
-    } else {
-      contextWindow = 200000;
-    }
-
-    // Calculate total context usage (including output_tokens, aligned with Claude Code)
+    // Calculate total context usage (input + output share the same context window)
+    // This is a per-call snapshot from the latest assistant message, no cross-turn double-counting.
     const totalUsed = inputTokens + cacheCreationTokens + cacheReadTokens + outputTokens;
 
     res.json({
