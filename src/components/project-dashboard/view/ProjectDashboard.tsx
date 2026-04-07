@@ -660,7 +660,7 @@ export default function ProjectDashboard({
           </div>
         </section>
 
-        <section className="grid gap-4 xl:grid-cols-2">
+        <section className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
           {projects.map((project, index) => {
             const sessions = getProjectSessions(project);
             const metadata = getTaskmasterMetadata(project);
@@ -706,10 +706,10 @@ export default function ProjectDashboard({
                           </span>
                         )}
                       </div>
+                      <p className="mt-0.5 truncate text-[10px] text-muted-foreground/60">
+                        {project.fullPath}
+                      </p>
                     </div>
-                    <p className="shrink-0 break-all text-[10px] text-muted-foreground/60 sm:text-right">
-                      {project.fullPath}
-                    </p>
 
                     <Button
                       variant="outline"
