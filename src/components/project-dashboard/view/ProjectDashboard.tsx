@@ -1,6 +1,7 @@
 import {
   Activity,
   ArrowRight,
+  ChevronDown,
   FolderOpen,
   FlaskConical,
   MessageSquare,
@@ -216,6 +217,7 @@ function getLastActivity(project: Project) {
   return project.createdAt ?? null;
 }
 
+
 function getTaskmasterMetadata(project: Project): TaskmasterMetadata | null {
   const metadata = project.taskmaster?.metadata;
 
@@ -278,9 +280,9 @@ function MetricPill({
   value: string | number;
 }) {
   return (
-    <div className="rounded-2xl border border-border/50 bg-background/70 p-3 shadow-sm">
-      <div className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">{label}</div>
-      <div className="mt-1.5 text-xl font-semibold text-foreground">{value}</div>
+    <div className="flex items-baseline gap-1">
+      <div className="text-[7px] uppercase tracking-[0.1em] text-muted-foreground whitespace-nowrap">{label}</div>
+      <div className="text-[11px] font-semibold text-foreground">{value}</div>
     </div>
   );
 }
@@ -294,6 +296,7 @@ export default function ProjectDashboard({
   const [tokenUsageSummary, setTokenUsageSummary] = useState<ProjectTokenUsageSummary | null>(null);
   const [autoResearchStatuses, setAutoResearchStatuses] = useState<Record<string, AutoResearchStatus>>({});
   const [autoResearchLoading, setAutoResearchLoading] = useState<Record<string, boolean>>({});
+  const [expandedAutoResearch, setExpandedAutoResearch] = useState<Record<string, boolean>>({});
   const [autoResearchConfigByProject, setAutoResearchConfigByProject] = useState<Record<string, AutoResearchConfig>>({});
 
   const totals = useMemo(() => {
@@ -647,7 +650,7 @@ export default function ProjectDashboard({
           </div>
         </section>
 
-        <section className="grid gap-4 xl:grid-cols-2">
+        <section className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
           {projects.map((project, index) => {
             const sessions = getProjectSessions(project);
             const metadata = getTaskmasterMetadata(project);
@@ -670,16 +673,16 @@ export default function ProjectDashboard({
             return (
               <article
                 key={project.name}
-                className={`relative overflow-hidden rounded-[28px] border border-border/60 bg-[linear-gradient(180deg,rgba(255,255,255,0.90),rgba(248,250,252,0.82))] p-5 shadow-sm transition-all duration-200 ${tone.border} hover:-translate-y-0.5 hover:shadow-md dark:bg-[linear-gradient(180deg,rgba(15,23,42,0.92),rgba(2,6,23,0.82))]`}
+                className={`relative overflow-hidden rounded-2xl border border-border/60 bg-[linear-gradient(180deg,rgba(255,255,255,0.90),rgba(248,250,252,0.82))] p-4 shadow-sm transition-all duration-200 ${tone.border} hover:-translate-y-0.5 hover:shadow-md dark:bg-[linear-gradient(180deg,rgba(15,23,42,0.92),rgba(2,6,23,0.82))]`}
               >
-                <div className={`absolute inset-x-0 top-0 h-20 bg-gradient-to-r ${tone.shell}`} />
-                <div className={`absolute right-5 top-5 h-16 w-16 rounded-full blur-2xl ${tone.orb}`} />
+                <div className={`absolute inset-x-0 top-0 h-24 bg-gradient-to-r ${tone.shell}`} />
+                <div className={`absolute right-4 top-4 h-12 w-12 rounded-full blur-2xl ${tone.orb}`} />
 
-                <div className="relative flex flex-col gap-4">
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="relative flex flex-col gap-3">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
-                        <h2 className="truncate text-xl font-semibold tracking-tight text-foreground">
+                        <h2 className="truncate text-lg font-semibold tracking-tight text-foreground">
                           {project.displayName}
                         </h2>
                         {progress !== null ? (
@@ -692,7 +695,7 @@ export default function ProjectDashboard({
                           </span>
                         )}
                       </div>
-                      <p className="mt-2 break-all text-xs text-muted-foreground sm:text-sm">
+                      <p className="mt-0.5 truncate text-[10px] text-muted-foreground/60">
                         {project.fullPath}
                       </p>
                     </div>
@@ -708,7 +711,7 @@ export default function ProjectDashboard({
                     </Button>
                   </div>
 
-                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+                  <div className="flex flex-wrap items-center gap-x-2.5 gap-y-0 rounded border border-border/30 bg-background/40 px-1.5 py-0.5 text-[10px]">
                     <MetricPill label={t('projectDashboard.metrics.sessions')} value={sessions.length} />
                     <MetricPill label={t('projectDashboard.metrics.tasks')} value={metadata?.taskCount ?? '0'} />
                     <MetricPill label={t('projectDashboard.metrics.completed')} value={metadata?.completed ?? '0'} />
@@ -722,150 +725,115 @@ export default function ProjectDashboard({
                     />
                   </div>
 
-                  <div className="rounded-2xl border border-border/50 bg-background/70 p-4 shadow-sm">
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-                        <Activity className="h-4 w-4 text-primary" />
+                  <div className="rounded-lg border border-border/50 bg-background/70 px-2.5 py-2 shadow-sm">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5 text-[11px] font-medium text-foreground">
+                        <Activity className="h-3 w-3 text-primary" />
                         {t('projectDashboard.progressTitle')}
                       </div>
-                      <div className="text-xs text-muted-foreground">
+                      <div className="text-[10px] text-muted-foreground">
                         {progress === null
                           ? t('projectDashboard.notTracked')
                           : t('projectDashboard.progressValue', { progress })}
                       </div>
                     </div>
-                    <div className="mt-3 h-2.5 overflow-hidden rounded-full bg-muted/80">
+                    <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-muted/80">
                       <div
                         className={`h-full rounded-full bg-gradient-to-r ${tone.progress} transition-[width] duration-300`}
                         style={{ width: `${progress ?? 6}%` }}
                       />
                     </div>
-                    <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
-                      <span>
-                        {lastActivity
-                          ? t('projectDashboard.lastActivity', {
-                              time: formatTimeAgo(lastActivity, now, t),
-                            })
-                          : t('projectDashboard.noRecentActivity')}
-                      </span>
-                      {metadata?.lastModified ? (
-                        <span>
-                          {t('projectDashboard.pipelineUpdated', {
-                            time: formatTimeAgo(metadata.lastModified, now, t),
-                          })}
-                        </span>
-                      ) : null}
-                    </div>
                   </div>
 
-                  <div className="rounded-2xl border border-border/50 bg-background/70 p-4 shadow-sm">
-                    <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <div className="text-sm font-medium text-foreground">Auto Research</div>
-                        <div className="mt-1 text-xs text-muted-foreground">
+
+                  <div className="rounded-lg border border-border/50 bg-background/70 shadow-sm">
+                    <button
+                      type="button"
+                      onClick={() => setExpandedAutoResearch((prev) => ({ ...prev, [project.name]: !prev[project.name] }))}
+                      className="w-full flex items-center justify-between gap-2 px-2.5 py-1.5 hover:bg-muted/30 transition-colors rounded-lg"
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="text-[11px] font-medium text-foreground">Auto Research</span>
+                        <span className="text-[10px] text-muted-foreground truncate">
                           {activeRun
-                            ? `Running ${activeRun.completedTasks ?? 0}/${activeRun.totalTasks ?? 0}${activeRun.currentTaskId ? `, task ${activeRun.currentTaskId}` : ''}`
+                            ? `Running ${activeRun.completedTasks ?? 0}/${activeRun.totalTasks ?? 0}`
                             : autoResearch?.eligibility?.eligible
                               ? `Ready via ${autoResearch.provider || 'claude'}`
                               : getAutoResearchReasonLabel(autoResearchDisabledReason)}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {activeRun ? (
+                          <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-1.5 py-px text-[9px] font-medium text-amber-700 dark:border-amber-800/60 dark:bg-amber-950/40 dark:text-amber-200">
+                            {activeRun.status}
+                          </span>
+                        ) : latestRun ? (
+                          <span className="inline-flex items-center rounded-full border border-border/60 bg-background/75 px-1.5 py-px text-[9px] font-medium text-muted-foreground">
+                            {latestRun.status}
+                          </span>
+                        ) : null}
+                        <ChevronDown className={`w-3 h-3 text-muted-foreground transition-transform duration-150 ${expandedAutoResearch[project.name] ? 'rotate-180' : ''}`} />
+                      </div>
+                    </button>
+
+                    {expandedAutoResearch[project.name] && (
+                      <div className="px-2.5 pb-2 space-y-1.5">
+                        {latestRun?.error ? (
+                          <div className="text-[10px] text-red-600 dark:text-red-400">{latestRun.error}</div>
+                        ) : null}
+                        {autoResearch?.pipeline?.nextTask?.title && !activeRun ? (
+                          <div className="text-[10px] text-muted-foreground">Next: {autoResearch.pipeline.nextTask.title}</div>
+                        ) : null}
+                        {!activeRun ? (
+                          <div className="text-[10px] text-muted-foreground">{getAutoResearchHint(autoResearch)}</div>
+                        ) : null}
+                        <div className="flex flex-wrap gap-2">
+                          <label className="min-w-[130px] flex-1">
+                            <span className="mb-0.5 block text-[10px] font-medium text-muted-foreground">Provider</span>
+                            <select
+                              value={autoResearchConfigWithDefaults.provider}
+                              onChange={(event) => handleAutoResearchProviderChange(project.name, event.target.value as AutoResearchProvider)}
+                              className="w-full rounded-full border border-border/60 bg-white px-2.5 py-1 text-[11px] dark:bg-slate-950"
+                              disabled={autoResearchBusy || Boolean(activeRun)}
+                            >
+                              {AUTO_RESEARCH_PROVIDER_OPTIONS.map((option) => (
+                                <option key={option.value} value={option.value}>{option.label}</option>
+                              ))}
+                            </select>
+                          </label>
+                          <label className="min-w-[150px] flex-1">
+                            <span className="mb-0.5 block text-[10px] font-medium text-muted-foreground">Model</span>
+                            <select
+                              value={autoResearchConfigWithDefaults.model}
+                              onChange={(event) => handleAutoResearchModelChange(project.name, event.target.value, autoResearchConfigWithDefaults.provider)}
+                              className="w-full rounded-full border border-border/60 bg-white px-2.5 py-1 text-[11px] dark:bg-slate-950"
+                              disabled={autoResearchBusy || Boolean(activeRun)}
+                            >
+                              {AUTO_RESEARCH_MODELS_BY_PROVIDER[autoResearchConfigWithDefaults.provider].map((modelOption) => (
+                                <option key={modelOption.value} value={modelOption.value}>{modelOption.label}</option>
+                              ))}
+                            </select>
+                          </label>
                         </div>
-                      </div>
-                      {activeRun ? (
-                        <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700 dark:border-amber-800/60 dark:bg-amber-950/40 dark:text-amber-200">
-                          {activeRun.status}
-                        </span>
-                      ) : latestRun ? (
-                        <span className="inline-flex items-center rounded-full border border-border/60 bg-background/75 px-2.5 py-1 text-xs font-medium text-muted-foreground">
-                          Last: {latestRun.status}
-                        </span>
-                      ) : null}
-                    </div>
-                    {latestRun?.error ? (
-                      <div className="mt-2 text-xs text-red-600 dark:text-red-400">
-                        {latestRun.error}
-                      </div>
-                    ) : null}
-                    {autoResearch?.pipeline?.nextTask?.title && !activeRun ? (
-                      <div className="mt-2 text-xs text-muted-foreground">
-                        Next: {autoResearch.pipeline.nextTask.title}
-                      </div>
-                    ) : null}
-                    {!activeRun ? (
-                      <div className="mt-2 text-xs text-muted-foreground">
-                        {getAutoResearchHint(autoResearch)}
-                      </div>
-                    ) : null}
-                    <div className="mt-3 flex flex-wrap gap-3">
-                      <label className="min-w-[150px] flex-1">
-                        <span className="mb-1 block text-[11px] font-medium text-muted-foreground">Provider</span>
-                        <select
-                          value={autoResearchConfigWithDefaults.provider}
-                          onChange={(event) => {
-                            handleAutoResearchProviderChange(project.name, event.target.value as AutoResearchProvider);
-                          }}
-                          className="w-full rounded-full border border-border/60 bg-white px-3 py-2 text-xs dark:bg-slate-950"
-                          disabled={autoResearchBusy || Boolean(activeRun)}
-                        >
-                          {AUTO_RESEARCH_PROVIDER_OPTIONS.map((option) => (
-                            <option key={option.value} value={option.value}>
-                              {option.label}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <label className="min-w-[180px] flex-1">
-                        <span className="mb-1 block text-[11px] font-medium text-muted-foreground">Model</span>
-                        <select
-                          value={autoResearchConfigWithDefaults.model}
-                          onChange={(event) => {
-                            handleAutoResearchModelChange(project.name, event.target.value, autoResearchConfigWithDefaults.provider);
-                          }}
-                          className="w-full rounded-full border border-border/60 bg-white px-3 py-2 text-xs dark:bg-slate-950"
-                          disabled={autoResearchBusy || Boolean(activeRun)}
-                        >
-                          {AUTO_RESEARCH_MODELS_BY_PROVIDER[autoResearchConfigWithDefaults.provider].map((modelOption) => (
-                            <option key={modelOption.value} value={modelOption.value}>
-                              {modelOption.label}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                    </div>
-                    {hasAutoResearchRun ? (
-                      (() => {
-                        const openableSessionProvider =
-                          activeRun?.provider || latestRun?.provider || autoResearch?.provider || 'claude';
-                        const sessionButtonLabel = openableSessionId
-                          ? 'Open Session'
-                          : activeRun
-                            ? 'Preparing Session...'
-                            : 'Session Unavailable';
-                        return (
-                          <div className="mt-3" key="openable-session-action">
+                        {hasAutoResearchRun ? (() => {
+                          const openableSessionProvider = activeRun?.provider || latestRun?.provider || autoResearch?.provider || 'claude';
+                          const sessionButtonLabel = openableSessionId ? 'Open Session' : activeRun ? 'Preparing...' : 'Unavailable';
+                          return (
                             <Button
+                              key="openable-session-action"
                               variant="outline"
                               size="sm"
                               className="rounded-full bg-white/60 backdrop-blur dark:bg-slate-950/35"
                               disabled={!openableSessionId}
-                              onClick={() => {
-                                if (!openableSessionId) {
-                                  return;
-                                }
-                                onProjectAction(
-                                  project,
-                                  'chat',
-                                  openableSessionId,
-                                  openableSessionProvider,
-                                );
-                              }}
+                              onClick={() => { if (openableSessionId) onProjectAction(project, 'chat', openableSessionId, openableSessionProvider); }}
                             >
-                              <MessageSquare className="h-4 w-4" />
+                              <MessageSquare className="h-3.5 w-3.5" />
                               {sessionButtonLabel}
                             </Button>
-                          </div>
-                        );
-                      })()
-                    ) : null}
+                          );
+                        })() : null}
+                      </div>
+                    )}
                   </div>
 
                   <div className="flex flex-wrap gap-2">
@@ -893,34 +861,6 @@ export default function ProjectDashboard({
                     >
                       <MessageSquare className="h-4 w-4" />
                       {t('projectDashboard.actions.chat')}
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="rounded-full bg-white/60 backdrop-blur dark:bg-slate-950/35"
-                      onClick={() => onProjectAction(project, 'files')}
-                    >
-                      <FolderOpen className="h-4 w-4" />
-                      {t('projectDashboard.actions.files')}
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="rounded-full bg-white/60 backdrop-blur dark:bg-slate-950/35"
-                      onClick={() => onProjectAction(project, 'researchlab')}
-                    >
-                      <FlaskConical className="h-4 w-4" />
-                      {t('projectDashboard.actions.researchLab')}
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="rounded-full"
-                      onClick={() => onProjectAction(project, 'shell')}
-                    >
-                      <Terminal className="h-4 w-4" />
-                      {t('projectDashboard.actions.shell')}
-                      <ArrowRight className="h-4 w-4" />
                     </Button>
                   </div>
                 </div>
