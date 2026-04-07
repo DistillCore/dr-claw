@@ -873,34 +873,6 @@ export default function ProjectDashboard({
                       <MessageSquare className="h-4 w-4" />
                       {t('projectDashboard.actions.chat')}
                     </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="rounded-full bg-white/60 backdrop-blur dark:bg-slate-950/35"
-                      onClick={() => onProjectAction(project, 'files')}
-                    >
-                      <FolderOpen className="h-4 w-4" />
-                      {t('projectDashboard.actions.files')}
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="rounded-full bg-white/60 backdrop-blur dark:bg-slate-950/35"
-                      onClick={() => onProjectAction(project, 'researchlab')}
-                    >
-                      <FlaskConical className="h-4 w-4" />
-                      {t('projectDashboard.actions.researchLab')}
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="rounded-full"
-                      onClick={() => onProjectAction(project, 'shell')}
-                    >
-                      <Terminal className="h-4 w-4" />
-                      {t('projectDashboard.actions.shell')}
-                      <ArrowRight className="h-4 w-4" />
-                    </Button>
                   </div>
                 </div>
               </article>
