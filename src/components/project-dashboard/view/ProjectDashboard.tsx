@@ -754,19 +754,6 @@ export default function ProjectDashboard({
                     </div>
                   </div>
 
-                  {/* Recent activities */}
-                  <div className="space-y-0.5 text-[10px] text-muted-foreground">
-                    {recentActivities.length > 0 ? (
-                      recentActivities.map((activity, i) => (
-                        <div key={i} className="flex items-center gap-1.5 truncate">
-                          <span className="shrink-0 text-muted-foreground/50">{formatTimeAgo(activity.date, now, t)}</span>
-                          <span className="truncate">{activity.title}</span>
-                        </div>
-                      ))
-                    ) : (
-                      <span>{t('projectDashboard.noRecentActivity')}</span>
-                    )}
-                  </div>
 
                   <div className="rounded-lg border border-border/50 bg-background/70 px-2.5 py-2 shadow-sm">
                     <div className="flex items-center justify-between gap-2">
