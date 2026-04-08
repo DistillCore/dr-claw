@@ -366,7 +366,9 @@
     "sidebarTabs": {
       "context": "Context",
       "research": "Research",
-      "files": "Files"
+      "files": "Files",
+      "shell": "Shell",
+      "git": "Code History"
     },
     "showLess": "Show less",
     "preview": {

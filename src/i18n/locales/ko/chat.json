@@ -366,7 +366,9 @@
     "sidebarTabs": {
       "context": "컨텍스트",
       "research": "연구",
-      "files": "파일"
+      "files": "파일",
+      "shell": "셸",
+      "git": "코드 히스토리"
     },
     "showLess": "접기",
     "preview": {

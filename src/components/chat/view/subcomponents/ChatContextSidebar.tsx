@@ -14,7 +14,9 @@ import {
   FlaskConical,
   Folder,
   FolderSearch,
+  GitBranch,
   Loader2,
+  Terminal,
   X,
   Zap,
   type LucideIcon,
@@ -22,6 +24,10 @@ import {
 
 import ResearchLab from '../../../ResearchLab';
 import FileTree from '../../../FileTree';
+import ShellWorkspace from '../../../main-content/view/subcomponents/ShellWorkspace';
+import GitPanel from '../../../GitPanel';
+
+const AnyGitPanel = GitPanel as any;
 
 import { cn } from '../../../../lib/utils';
 import { useDeviceSettings } from '../../../../hooks/useDeviceSettings';
@@ -77,7 +83,7 @@ const SECTION_STYLES: Record<SectionTone, {
   },
 };
 
-type SidebarTab = 'context' | 'research' | 'files';
+type SidebarTab = 'context' | 'research' | 'files' | 'shell' | 'git';
 
 interface ChatContextSidebarProps {
   selectedProject: Project | null;
@@ -641,6 +647,8 @@ export default function ChatContextSidebar({
                 { id: 'context' as SidebarTab, icon: FolderSearch, labelKey: 'sessionContext.sidebarTabs.context' },
                 { id: 'research' as SidebarTab, icon: FlaskConical, labelKey: 'sessionContext.sidebarTabs.research' },
                 { id: 'files' as SidebarTab, icon: Folder, labelKey: 'sessionContext.sidebarTabs.files' },
+                { id: 'shell' as SidebarTab, icon: Terminal, labelKey: 'sessionContext.sidebarTabs.shell' },
+                { id: 'git' as SidebarTab, icon: GitBranch, labelKey: 'sessionContext.sidebarTabs.git' },
               ]).map((tab) => {
                 const TabIcon = tab.icon;
                 const isActive = tab.id === activeSidebarTab;
@@ -708,6 +716,8 @@ export default function ChatContextSidebar({
             { id: 'context' as SidebarTab, icon: FolderSearch, labelKey: 'sessionContext.sidebarTabs.context' },
             { id: 'research' as SidebarTab, icon: FlaskConical, labelKey: 'sessionContext.sidebarTabs.research' },
             { id: 'files' as SidebarTab, icon: Folder, labelKey: 'sessionContext.sidebarTabs.files' },
+            { id: 'shell' as SidebarTab, icon: Terminal, labelKey: 'sessionContext.sidebarTabs.shell' },
+            { id: 'git' as SidebarTab, icon: GitBranch, labelKey: 'sessionContext.sidebarTabs.git' },
           ]).map((tab) => {
             const TabIcon = tab.icon;
             const isActive = tab.id === activeSidebarTab;
@@ -964,6 +974,14 @@ export default function ChatContextSidebar({
             onFileOpen={onFileOpen}
             onStartWorkspaceQa={onStartWorkspaceQa}
           />
+        </div>
+      ) : activeSidebarTab === 'shell' ? (
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <ShellWorkspace project={selectedProject!} session={selectedSession} />
+        </div>
+      ) : activeSidebarTab === 'git' ? (
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <AnyGitPanel selectedProject={selectedProject} isMobile={isMobile} onFileOpen={onFileOpen} />
         </div>
       ) : null}
     </aside>

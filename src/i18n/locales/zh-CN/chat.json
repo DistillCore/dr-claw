@@ -366,7 +366,9 @@
     "sidebarTabs": {
       "context": "上下文",
       "research": "研究",
-      "files": "文件"
+      "files": "文件",
+      "shell": "终端",
+      "git": "代码历史"
     },
     "showLess": "收起",
     "preview": {
