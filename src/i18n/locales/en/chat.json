@@ -288,6 +288,13 @@
       "default": "Select a provider above to begin"
     }
   },
+  "localModels": {
+    "loading": "Loading models...",
+    "notRunning": "Ollama offline",
+    "loadFailed": "Model load failed",
+    "networkError": "Model server unreachable",
+    "empty": "No models"
+  },
   "session": {
     "mode": {
       "title": "Choose Session Type",
