@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  AlertCircle,
   Check,
   ChevronDown,
   ChevronUp,
@@ -11,12 +12,14 @@ import {
   Loader2,
   Package,
   Play,
+  Plus,
   Settings,
-  AlertCircle,
+  X,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { api } from '../utils/api';
 import { AUTO_RESEARCH_PACKS, type LocaleKey, type PackDef } from '../constants/autoResearchPacks';
+import useLocalStorage from '../hooks/useLocalStorage';
 
 function resolveLocaleKey(lang: string): LocaleKey {
   if (lang.startsWith('zh')) return 'zh';
@@ -53,6 +56,19 @@ const TEXT: Record<LocaleKey, Record<string, string>> = {
     selectWorkflow: '选择研究工作流',
     inputPlaceholder: '输入你的研究方向或主题...',
     startResearch: '开始研究',
+    guideTitle: '如何使用 Auto Research Hub',
+    guideDesc: '从选择工具包到执行研究，只需 5 步即可开始自动化研究。',
+    guideStep1: '浏览下方的工具包，选择一个适合你研究需求的（如 ARIS、Autoresearch 或 DeepScientist）。',
+    guideStep2: '对于需要配置的工具包（如 ARIS），展开"环境配置"，选择 MCP 审稿服务，输入 API Key，然后点击"一键配置"。零依赖工具包无需此步骤。',
+    guideStep3: '前往 Chat 页面，点击输入框上方的"Auto Research"下拉菜单，选择对应的工具包和工作流。',
+    guideStep4: '输入你的研究方向或主题，Agent 将端到端执行所选工作流。',
+    guideStep5: '在 Research Lab 中查看研究成果，或直接查看项目的 pipeline 目录下的产出文件。',
+    guideCollapse: '收起',
+    guideExpand: '展开',
+    guideDismiss: '不再显示',
+    ctaTitle: '你的工具包',
+    ctaDesc: '有自己的 Auto Research 流程？提交你的工具包，让全球研究者使用！',
+    ctaButton: '提交工具包',
   },
   en: {
     title: 'Auto Research Hub',
@@ -80,6 +96,19 @@ const TEXT: Record<LocaleKey, Record<string, string>> = {
     selectWorkflow: 'Select workflow',
     inputPlaceholder: 'Enter your research topic...',
     startResearch: 'Start Research',
+    guideTitle: 'How to Use Auto Research Hub',
+    guideDesc: 'From picking a tool pack to running research — get started in 5 steps.',
+    guideStep1: 'Browse the packs below and pick one that fits your research needs (e.g. ARIS, Autoresearch, or DeepScientist).',
+    guideStep2: 'For packs that require configuration (e.g. ARIS), expand "Configuration", select an MCP Reviewer, enter your API key, and click "Auto Configure". Zero-dependency packs skip this step.',
+    guideStep3: 'Go to Chat, click the "Auto Research" dropdown above the input box, and select your pack and workflow.',
+    guideStep4: 'Enter your research topic — the agent will execute the selected workflow end-to-end.',
+    guideStep5: 'Check results in Research Lab or browse the output files in your project\'s pipeline directory.',
+    guideCollapse: 'Collapse',
+    guideExpand: 'Expand',
+    guideDismiss: 'Remove forever',
+    ctaTitle: 'Your Pack Here',
+    ctaDesc: 'Built your own Auto Research workflow? Submit it as a tool pack and share it with researchers worldwide!',
+    ctaButton: 'Submit a Pack',
   },
   ko: {
     title: 'Auto Research Hub',
@@ -107,6 +136,19 @@ const TEXT: Record<LocaleKey, Record<string, string>> = {
     selectWorkflow: 'Select workflow',
     inputPlaceholder: 'Enter your research topic...',
     startResearch: 'Start Research',
+    guideTitle: 'Auto Research Hub 사용법',
+    guideDesc: '도구 팩 선택부터 연구 실행까지 5단계로 시작하세요.',
+    guideStep1: '아래 도구 팩을 둘러보고 연구 목적에 맞는 팩을 선택하세요 (예: ARIS, Autoresearch, DeepScientist).',
+    guideStep2: '설정이 필요한 팩(예: ARIS)은 "Configuration"을 펼치고 MCP Reviewer를 선택한 뒤 API 키를 입력하고 "Auto Configure"를 클릭하세요.',
+    guideStep3: 'Chat으로 이동하여 입력창 위의 "Auto Research" 드롭다운에서 팩과 워크플로를 선택하세요.',
+    guideStep4: '연구 주제를 입력하면 에이전트가 선택한 워크플로를 실행합니다.',
+    guideStep5: 'Research Lab에서 결과를 확인하거나 프로젝트의 pipeline 디렉터리에서 출력 파일을 확인하세요.',
+    guideCollapse: '접기',
+    guideExpand: '펼치기',
+    guideDismiss: '다시 표시 안 함',
+    ctaTitle: '나만의 팩',
+    ctaDesc: '나만의 Auto Research 워크플로를 만들었나요? 도구 팩으로 제출하고 전 세계 연구자와 공유하세요!',
+    ctaButton: '팩 제출하기',
   },
 };
 
@@ -114,6 +156,9 @@ export default function AutoResearchHub() {
   const { i18n } = useTranslation();
   const locale = useMemo(() => resolveLocaleKey(i18n.language || 'en'), [i18n.language]);
   const t = TEXT[locale];
+
+  const [guideCollapsed, setGuideCollapsed] = useLocalStorage('auto-research-hub-guide-collapsed', false);
+  const [guideDismissed, setGuideDismissed] = useLocalStorage('auto-research-hub-guide-dismissed', false);
 
   const [copiedCommand, setCopiedCommand] = useState<string | null>(null);
   const [expandedConfig, setExpandedConfig] = useState<Set<string>>(new Set());
@@ -175,25 +220,100 @@ export default function AutoResearchHub() {
 
   return (
     <div className="h-full overflow-auto bg-background">
-      <div className="mx-auto max-w-3xl p-4 sm:p-6">
+      <div className="mx-auto max-w-[1600px] p-4 sm:p-6">
         {/* Header */}
-        <div className="relative mb-6 overflow-hidden rounded-[28px] border border-purple-200/60 bg-[radial-gradient(circle_at_top_left,_rgba(168,85,247,0.15),_transparent_40%),linear-gradient(135deg,_rgba(248,250,252,0.95),_rgba(250,245,255,0.9))] p-6 shadow-sm dark:border-purple-800/30 dark:bg-[radial-gradient(circle_at_top_left,_rgba(168,85,247,0.12),_transparent_40%),linear-gradient(135deg,_rgba(2,6,23,0.96),_rgba(15,10,30,0.92))]">
-          <div className="absolute -right-10 -top-10 h-32 w-32 rounded-full bg-purple-200/40 blur-3xl dark:bg-purple-500/15" />
-          <div className="flex items-center gap-3">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-purple-100 text-purple-700 shadow-sm dark:bg-purple-900/40 dark:text-purple-200">
-              <FlaskConical className="h-6 w-6" />
+        <div className="relative mb-5 overflow-hidden rounded-[28px] border border-purple-200/60 bg-[radial-gradient(circle_at_top_left,_rgba(168,85,247,0.15),_transparent_40%),linear-gradient(135deg,_rgba(248,250,252,0.95),_rgba(250,245,255,0.9))] p-5 shadow-sm dark:border-purple-800/30 dark:bg-[radial-gradient(circle_at_top_left,_rgba(168,85,247,0.12),_transparent_40%),linear-gradient(135deg,_rgba(2,6,23,0.96),_rgba(15,10,30,0.92))]">
+          <div className="absolute -right-10 -top-10 h-32 w-32 rounded-full bg-purple-200/50 blur-3xl dark:bg-purple-500/20" />
+          <div className="absolute bottom-0 right-20 h-24 w-24 rounded-full bg-fuchsia-200/40 blur-2xl dark:bg-fuchsia-500/10" />
+
+          <div className="relative">
+            <div className="inline-flex items-center gap-2 rounded-full border border-purple-200/70 bg-white/80 px-3 py-1 text-xs font-medium uppercase tracking-[0.24em] text-purple-700 shadow-sm dark:border-purple-800/60 dark:bg-slate-950/60 dark:text-purple-200">
+              <FlaskConical className="h-3.5 w-3.5" />
+              Auto Research
             </div>
-            <div>
-              <h1 className="text-2xl font-bold tracking-tight text-foreground sm:text-3xl">{t.title}</h1>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {locale === 'zh' ? '配置 Auto Research 工具包。在 Chat 的 Auto Research 下拉框中使用。' : 'Configure Auto Research tool packs. Use them from the Auto Research dropdown in Chat.'}
-              </p>
+            <h1 className="mt-4 text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">{t.title}</h1>
+            <p className="mt-3 max-w-3xl text-sm leading-6 text-muted-foreground">{t.subtitle}</p>
+
+            <div className="mt-4 grid gap-3 sm:grid-cols-3">
+              <div className="rounded-2xl border border-white/80 bg-white/80 p-4 shadow-sm backdrop-blur dark:border-white/10 dark:bg-slate-950/50">
+                <p className="text-xl font-semibold text-foreground">{PACKS.length}</p>
+                <p className="mt-1 text-xs uppercase tracking-[0.2em] text-muted-foreground">
+                  {locale === 'zh' ? '工具包' : 'Tool Packs'}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-white/80 bg-white/80 p-4 shadow-sm backdrop-blur dark:border-white/10 dark:bg-slate-950/50">
+                <p className="text-xl font-semibold text-foreground">{PACKS.reduce((sum, p) => sum + p.workflows.length, 0)}</p>
+                <p className="mt-1 text-xs uppercase tracking-[0.2em] text-muted-foreground">
+                  {locale === 'zh' ? '工作流' : 'Workflows'}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-white/80 bg-white/80 p-4 shadow-sm backdrop-blur dark:border-white/10 dark:bg-slate-950/50">
+                <p className="text-xl font-semibold text-foreground">{PACKS.filter(p => p.mcp.length === 0).length}</p>
+                <p className="mt-1 text-xs uppercase tracking-[0.2em] text-muted-foreground">
+                  {locale === 'zh' ? '零依赖' : 'Zero Deps'}
+                </p>
+              </div>
             </div>
           </div>
         </div>
 
+        {/* Usage guide */}
+        {!guideDismissed && (
+          <div className="relative mb-5 overflow-hidden rounded-[28px] border border-sky-200/70 bg-[radial-gradient(circle_at_top_left,rgba(125,211,252,0.24),transparent_38%),linear-gradient(180deg,rgba(248,250,252,0.96),rgba(239,246,255,0.94))] p-5 shadow-sm dark:border-sky-900/70 dark:bg-[radial-gradient(circle_at_top_left,rgba(56,189,248,0.18),transparent_38%),linear-gradient(180deg,rgba(15,23,42,0.96),rgba(2,6,23,0.94))]">
+            <div className="absolute -right-10 -top-8 h-28 w-28 rounded-full bg-sky-200/40 blur-3xl dark:bg-sky-500/10" />
+            <div className="relative flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="flex min-w-0 items-start gap-3">
+                <div className="relative flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-2xl border border-sky-200/80 bg-white/80 text-sky-700 shadow-sm dark:border-sky-900/70 dark:bg-slate-950/50 dark:text-sky-300">
+                  <AlertCircle className="w-5 h-5" />
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-base font-semibold tracking-tight text-slate-900 dark:text-sky-100">
+                    {t.guideTitle}
+                  </h3>
+                  {!guideCollapsed ? (
+                    <p className="mt-1 text-sm leading-6 text-slate-700 dark:text-sky-100/85">
+                      {t.guideDesc}
+                    </p>
+                  ) : (
+                    <p className="mt-1 text-xs text-slate-600 dark:text-sky-100/70">
+                      {locale === 'zh' ? '教程已折叠，点击展开查看。' : 'Guide hidden. Expand to view steps.'}
+                    </p>
+                  )}
+                </div>
+              </div>
+              <div className="flex shrink-0 flex-wrap items-center gap-2 sm:justify-end">
+                <button
+                  type="button"
+                  className="inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-xs font-medium text-slate-700 hover:bg-sky-100/60 hover:text-slate-900 dark:text-sky-100/80 dark:hover:bg-sky-900/30 dark:hover:text-sky-100"
+                  onClick={() => setGuideCollapsed(!guideCollapsed)}
+                >
+                  {guideCollapsed ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
+                  {guideCollapsed ? t.guideExpand : t.guideCollapse}
+                </button>
+                <button
+                  type="button"
+                  className="inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-xs font-medium text-slate-700 hover:bg-sky-100/60 hover:text-slate-900 dark:text-sky-100/80 dark:hover:bg-sky-900/30 dark:hover:text-sky-100"
+                  onClick={() => setGuideDismissed(true)}
+                >
+                  <X className="h-4 w-4" />
+                  {t.guideDismiss}
+                </button>
+              </div>
+            </div>
+            {!guideCollapsed && (
+              <div className="relative mt-4 space-y-3 pl-14">
+                <ol className="list-decimal pl-4 space-y-1.5 text-sm text-slate-700 dark:text-sky-100/85">
+                  {(['guideStep1', 'guideStep2', 'guideStep3', 'guideStep4', 'guideStep5'] as const).map((key) => (
+                    <li key={key}>{t[key]}</li>
+                  ))}
+                </ol>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Packs — config only */}
-        <div className="space-y-5">
+        <div className="grid gap-5 lg:grid-cols-2 xl:grid-cols-3">
           {PACKS.map((pack, packIdx) => {
             const accent = PACK_ACCENTS[packIdx % PACK_ACCENTS.length];
             const mcpKey = selectedMcp[pack.name] || pack.mcp[0]?.key || '';
@@ -356,6 +476,29 @@ export default function AutoResearchHub() {
               </div>
             );
           })}
+
+          {/* CTA placeholder card */}
+          <a
+            href="https://github.com/OpenLAIR/dr-claw/issues/new?labels=auto-research-pack&template=pack_submission.md"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="group flex flex-col items-center justify-center gap-4 rounded-2xl border-2 border-dashed border-border/60 bg-muted/20 p-8 text-center transition-all hover:border-purple-300 hover:bg-purple-50/30 dark:hover:border-purple-700 dark:hover:bg-purple-950/20"
+          >
+            <div className="flex h-14 w-14 items-center justify-center rounded-2xl border-2 border-dashed border-muted-foreground/30 text-muted-foreground/50 transition-colors group-hover:border-purple-400 group-hover:text-purple-600 dark:group-hover:border-purple-500 dark:group-hover:text-purple-300">
+              <Plus className="h-7 w-7" />
+            </div>
+            <div>
+              <h2 className="text-lg font-bold text-muted-foreground/70 transition-colors group-hover:text-purple-700 dark:group-hover:text-purple-200">
+                {t.ctaTitle}
+              </h2>
+              <p className="mt-1.5 max-w-xs text-xs text-muted-foreground/60 transition-colors group-hover:text-muted-foreground">
+                {t.ctaDesc}
+              </p>
+            </div>
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-purple-200/60 bg-purple-50/60 px-4 py-1.5 text-xs font-semibold text-purple-600 transition-all group-hover:bg-purple-100 group-hover:text-purple-700 dark:border-purple-800/40 dark:bg-purple-950/30 dark:text-purple-300 dark:group-hover:bg-purple-900/40">
+              {t.ctaButton}
+            </span>
+          </a>
         </div>
       </div>
     </div>
