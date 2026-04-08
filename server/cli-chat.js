@@ -365,18 +365,6 @@ export async function startChat(options = {}) {
     prompt: styled(c.cyan, '  ❯ '),
   });
 
-  // Read user memories from ~/.claude/MEMORY.md if it exists
-  let memoryBlock = '';
-  try {
-    const memoryPath = path.join(os.homedir(), '.claude', 'MEMORY.md');
-    memoryBlock = await fs.readFile(memoryPath, 'utf-8');
-    if (memoryBlock.trim()) {
-      memoryBlock = '\n\n' + memoryBlock.trim();
-    }
-  } catch {
-    // no MEMORY.md, skip
-  }
-
   const systemPrompt = [
     `You are a powerful agentic AI assistant. You operate in the directory: ${workingDir}`,
     '',
@@ -384,7 +372,7 @@ export async function startChat(options = {}) {
     'Use tools proactively to explore the project and produce high-quality output.',
     'Always prefer tools over guessing about file contents or project structure.',
     `Today is ${new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}.`,
-  ].join('\n') + memoryBlock;
+  ].join('\n');
 
   const messages = [{ role: 'system', content: systemPrompt }];
 
