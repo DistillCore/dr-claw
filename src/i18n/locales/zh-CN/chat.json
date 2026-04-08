@@ -301,7 +301,8 @@
       "workspaceQaTitle": "工作区问答",
       "workspaceQaDescription": "只询问文件、模块和实现细节，不触发研究流程。",
       "workspaceQaGreeting": "你可以询问这个工作区中的任意文件、模块或实现细节。除非你明确要求开始研究规划，否则我会始终聚焦于代码和项目结构。",
-      "workspaceQaHint": "这个会话会聚焦仓库问题，除非你明确要求开始研究规划。"
+      "workspaceQaHint": "这个会话会聚焦仓库问题，除非你明确要求开始研究规划。",
+      "workspaceQaPlaceholder": "询问任意文件、模块或实现细节..."
     },
     "continue": {
       "title": "继续您的对话",

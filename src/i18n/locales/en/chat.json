@@ -301,7 +301,8 @@
       "workspaceQaTitle": "Workspace Q&A",
       "workspaceQaDescription": "Ask about files, modules, and implementation details without triggering the research workflow.",
       "workspaceQaGreeting": "Ask about any file, module, or implementation detail in this workspace. I will stay focused on code and project structure unless you explicitly ask to start research planning.",
-      "workspaceQaHint": "This session stays focused on repository questions unless you explicitly ask to start research planning."
+      "workspaceQaHint": "This session stays focused on repository questions unless you explicitly ask to start research planning.",
+      "workspaceQaPlaceholder": "Ask about any file, module, or implementation detail..."
     },
     "continue": {
       "title": "Continue your conversation",
