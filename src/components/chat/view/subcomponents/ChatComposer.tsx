@@ -4,6 +4,7 @@ import { MicButton } from '../../../MicButton.jsx';
 import ImageAttachment from './ImageAttachment';
 import PermissionRequestsBanner from './PermissionRequestsBanner';
 import ChatInputControls from './ChatInputControls';
+
 import ReferencePicker from '../../../references/view/ReferencePicker';
 import PromptBadgeDropdown from './PromptBadgeDropdown';
 import { Plus } from 'lucide-react';
@@ -155,7 +156,6 @@ interface ChatComposerProps {
   onUpdateAttachedPrompt: (promptText: string) => void;
   centered?: boolean;
   setAttachedPrompt?: (prompt: AttachedPrompt | null) => void;
-  // Provider selection props
   setProvider?: (next: SessionProvider) => void;
   claudeModel?: string;
   setClaudeModel?: (model: string) => void;
@@ -507,20 +507,19 @@ export default function ChatComposer({
               onBlur={() => onInputFocusChange?.(false)}
               onInput={onTextareaInput}
               placeholder={placeholder}
-              disabled={isLoading}
-              className={`chat-input-placeholder block w-full pl-5 ${centered ? 'pr-16 pt-4 pb-2 min-h-[72px] max-h-[200px] text-sm' : 'pr-20 sm:pr-40 py-1.5 sm:py-4 min-h-[50px] sm:min-h-[80px] max-h-[40vh] sm:max-h-[300px] text-base'} bg-transparent rounded-3xl focus:outline-none text-foreground placeholder-muted-foreground/50 disabled:opacity-50 resize-none overflow-y-auto leading-6 transition-all duration-200`}
+              className={`chat-input-placeholder block w-full pl-5 ${centered ? 'pr-16 pt-4 pb-2 min-h-[72px] max-h-[200px] text-sm' : 'pr-20 sm:pr-40 py-1.5 sm:py-4 min-h-[50px] sm:min-h-[80px] max-h-[40vh] sm:max-h-[300px] text-base'} bg-transparent rounded-3xl focus:outline-none text-foreground placeholder-muted-foreground/50 resize-none overflow-y-auto leading-6 transition-all duration-200 ${isLoading && !input.trim().startsWith('/') ? 'opacity-50' : ''}`}
               style={{ height: centered ? '72px' : '50px' }}
             />
-
-
-
             <div className={`absolute ${centered ? 'right-11' : 'right-14'} top-1/2 transform -translate-y-1/2`}>
               <MicButton onTranscript={onTranscript} className={centered ? '!w-7 !h-7' : '!w-9 !h-9'} />
             </div>
 
             <button
               type="submit"
-              disabled={(!input.trim() && attachedFiles.length === 0 && !attachedPrompt) || isLoading}
+              disabled={
+                (!input.trim() && attachedFiles.length === 0 && !attachedPrompt) ||
+                (isLoading && !input.trim().startsWith('/btw '))
+              }
               onMouseDown={(event) => {
                 event.preventDefault();
                 onSubmit(event);
