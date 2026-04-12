@@ -22,6 +22,7 @@ import { oneDark as prismOneDark } from 'react-syntax-highlighter/dist/esm/style
 import { api } from '../utils/api';
 import { useTranslation } from 'react-i18next';
 import { Eye, Code2 } from 'lucide-react';
+import JsonTreeViewer from './JsonTreeViewer';
 
 // Custom .env file syntax highlighting
 const envLanguage = StreamLanguage.define({
@@ -173,9 +174,9 @@ function CodeEditor({ file, onClose, projectPath, selectedProject = null, onStar
   const [fontSize, setFontSize] = useState(() => {
     return localStorage.getItem('codeEditorFontSize') || '12';
   });
-  const [markdownPreview, setMarkdownPreview] = useState(() => {
+  const [viewMode, setViewMode] = useState(() => {
     const ext = file?.name?.split('.').pop()?.toLowerCase();
-    return ext === 'md' || ext === 'markdown';
+    return ['md', 'markdown', 'json', 'html', 'htm'].includes(ext) ? 'preview' : 'edit';
   });
   const [candidates, setCandidates] = useState(null);
   const [resolvedPath, setResolvedPath] = useState(null);
@@ -187,18 +188,24 @@ function CodeEditor({ file, onClose, projectPath, selectedProject = null, onStar
     onClose();
   };
 
+  // File type detection
+  const fileExt = useMemo(() => file.name.split('.').pop()?.toLowerCase() || '', [file.name]);
+
   // Check if file is markdown
   const isMarkdownFile = useMemo(() => {
     const ext = file.name.split('.').pop()?.toLowerCase();
     return ext === 'md' || ext === 'markdown';
   }, [file.name]);
-
-  // File type detection
-  const fileExt = useMemo(() => file.name.split('.').pop()?.toLowerCase() || '', [file.name]);
+  const isJsonFile = useMemo(() => fileExt === 'json', [fileExt]);
+  const isHtmlFile = useMemo(() => fileExt === 'html' || fileExt === 'htm', [fileExt]);
   const isPdf = useMemo(() => fileExt === 'pdf', [fileExt]);
   const isImage = useMemo(() => IMAGE_EXTENSIONS.has(fileExt), [fileExt]);
   const isUnsupported = useMemo(() => UNSUPPORTED_EXTENSIONS.has(fileExt), [fileExt]);
   const isBinary = isPdf || isImage;
+  const supportsPreviewMode = useMemo(
+    () => !isBinary && !isUnsupported && (isMarkdownFile || isJsonFile || isHtmlFile),
+    [isBinary, isUnsupported, isMarkdownFile, isJsonFile, isHtmlFile],
+  );
   const [blobUrl, setBlobUrl] = useState(null);
   const absoluteFilePath = useMemo(() => {
     if (!file?.path) {
@@ -235,7 +242,7 @@ function CodeEditor({ file, onClose, projectPath, selectedProject = null, onStar
     setResolvedPath(null);
     setCandidates(null);
     const ext = file?.name?.split('.').pop()?.toLowerCase();
-    setMarkdownPreview(ext === 'md' || ext === 'markdown');
+    setViewMode(['md', 'markdown', 'json', 'html', 'htm'].includes(ext) ? 'preview' : 'edit');
   }, [file?.path, file?.name]);
 
   // Create minimap extension with chunk-based gutters
@@ -917,17 +924,17 @@ function CodeEditor({ file, onClose, projectPath, selectedProject = null, onStar
               </button>
             )}
 
-            {!isBinary && !isUnsupported && isMarkdownFile && (
+            {supportsPreviewMode && (
               <button
-                onClick={() => setMarkdownPreview(!markdownPreview)}
+                onClick={() => setViewMode((current) => (current === 'preview' ? 'edit' : 'preview'))}
                 className={`p-1.5 rounded-md min-w-[36px] min-h-[36px] md:min-w-0 md:min-h-0 flex items-center justify-center transition-colors ${
-                  markdownPreview
+                  viewMode === 'preview'
                     ? 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30'
                     : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-800'
                 }`}
-                title={markdownPreview ? t('actions.editMarkdown') : t('actions.previewMarkdown')}
+                title={viewMode === 'preview' ? t('actions.editFile') : t('actions.previewFile')}
               >
-                {markdownPreview ? <Code2 className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                {viewMode === 'preview' ? <Code2 className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
               </button>
             )}
 
@@ -1004,11 +1011,24 @@ function CodeEditor({ file, onClose, projectPath, selectedProject = null, onStar
             <div className="h-full overflow-auto flex items-center justify-center bg-muted/30 p-4">
               <img src={blobUrl} alt={file.name} className="max-w-full max-h-full object-contain rounded" />
             </div>
-          ) : markdownPreview && isMarkdownFile ? (
+          ) : viewMode === 'preview' && isMarkdownFile ? (
             <div className="h-full overflow-y-auto bg-white dark:bg-gray-900">
               <div className="max-w-4xl mx-auto px-8 py-6 prose prose-sm dark:prose-invert prose-headings:font-semibold prose-a:text-blue-600 dark:prose-a:text-blue-400 prose-code:text-sm prose-pre:bg-gray-900 prose-img:rounded-lg max-w-none">
                 <MarkdownPreview content={content} />
               </div>
+            </div>
+          ) : viewMode === 'preview' && isJsonFile ? (
+            <div className="h-full overflow-auto bg-[radial-gradient(circle_at_top_left,rgba(56,189,248,0.08),transparent_28%),linear-gradient(180deg,rgba(248,250,252,0.92),rgba(255,255,255,0.94))] p-4 dark:bg-[radial-gradient(circle_at_top_left,rgba(14,165,233,0.10),transparent_28%),linear-gradient(180deg,rgba(15,23,42,0.98),rgba(2,6,23,0.98))]">
+              <JsonTreeViewer content={content} defaultExpandDepth={1} className="min-h-full" />
+            </div>
+          ) : viewMode === 'preview' && isHtmlFile ? (
+            <div className="h-full overflow-auto bg-muted/20 p-4">
+              <iframe
+                title={file.name}
+                srcDoc={content}
+                sandbox="allow-scripts allow-same-origin"
+                className="h-full min-h-[42rem] w-full rounded-2xl border border-border/60 bg-white shadow-sm"
+              />
             </div>
           ) : (
             <CodeMirror
