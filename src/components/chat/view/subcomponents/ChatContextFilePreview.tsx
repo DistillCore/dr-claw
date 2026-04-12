@@ -10,13 +10,22 @@ import { Button } from '../../../ui/button';
 import { api } from '../../../../utils/api';
 import type { SessionContextFileItem, SessionContextOutputItem } from '../../utils/sessionContextSummary';
 
+export type PreviewFileTarget =
+  | SessionContextFileItem
+  | SessionContextOutputItem
+  | {
+      name?: string;
+      relativePath: string;
+      absolutePath?: string;
+    };
+
 const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg']);
 const AUDIO_EXTENSIONS = new Set(['mp3', 'wav', 'ogg', 'flac', 'm4a']);
 const VIDEO_EXTENSIONS = new Set(['mp4', 'mov', 'webm', 'mkv']);
 const MARKDOWN_EXTENSIONS = new Set(['md', 'mdx']);
 const HTML_EXTENSIONS = new Set(['html', 'htm']);
 
-type PreviewFile = SessionContextFileItem | SessionContextOutputItem | null;
+type PreviewFile = PreviewFileTarget | null;
 
 type PreviewKind = 'empty' | 'loading' | 'text' | 'markdown' | 'html' | 'pdf' | 'image' | 'audio' | 'video' | 'error';
 

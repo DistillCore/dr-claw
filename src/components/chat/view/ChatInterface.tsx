@@ -974,7 +974,7 @@ function ChatInterface({
           onSidebarTabChange={setSidebarTab}
           isCollapsed={isSidebarCollapsed}
           onCollapsedChange={setIsSidebarCollapsed}
-          onStartWorkspaceQa={onStartWorkspaceQa}
+          onStartWorkspaceQa={onStartWorkspaceQa ?? undefined}
           onStartTask={handleStartTaskInChat}
         />
       </div>
