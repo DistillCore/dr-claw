@@ -25,8 +25,16 @@ export default function ChatTabBar({ tabs, processingSessions, onSwitchTab, onCl
   };
 
   const handleTabKeyDown = (e: React.KeyboardEvent, tabIndex: number) => {
+    // Delete/Backspace closes the focused tab
+    if (e.key === 'Delete' || e.key === 'Backspace') {
+      e.preventDefault();
+      onCloseTab(tabs[tabIndex].id);
+      return;
+    }
+
     let nextIndex: number | null = null;
-    const modKey = e.metaKey && e.altKey; // Cmd+Opt on macOS
+    // Cmd+Opt (macOS) or Ctrl+Alt (Windows/Linux)
+    const modKey = (e.metaKey || e.ctrlKey) && e.altKey;
 
     switch (e.key) {
       case 'ArrowRight':
