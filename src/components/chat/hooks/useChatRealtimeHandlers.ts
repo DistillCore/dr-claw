@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
 import { isTemporarySessionId } from '../../../constants/session';
 import {
@@ -23,35 +23,6 @@ import type { Project, ProjectSession, SessionNavigationSource, SessionProvider 
 type PendingViewSession = {
   sessionId: string | null;
   startedAt: number;
-};
-
-const BACKGROUND_SESSION_MESSAGE_QUEUE = new Map<string, LatestChatMessage[]>();
-
-const enqueueBackgroundSessionMessage = (sessionId: string, message: LatestChatMessage) => {
-  const existing = BACKGROUND_SESSION_MESSAGE_QUEUE.get(sessionId) || [];
-  BACKGROUND_SESSION_MESSAGE_QUEUE.set(sessionId, [...existing, message]);
-};
-
-const dequeueBackgroundSessionMessages = (sessionId: string) => {
-  const existing = BACKGROUND_SESSION_MESSAGE_QUEUE.get(sessionId) || [];
-  BACKGROUND_SESSION_MESSAGE_QUEUE.delete(sessionId);
-  return existing;
-};
-
-const shiftBackgroundSessionMessage = (sessionId: string) => {
-  const existing = BACKGROUND_SESSION_MESSAGE_QUEUE.get(sessionId) || [];
-  if (existing.length === 0) {
-    return null;
-  }
-
-  const [nextMessage, ...remaining] = existing;
-  if (remaining.length > 0) {
-    BACKGROUND_SESSION_MESSAGE_QUEUE.set(sessionId, remaining);
-  } else {
-    BACKGROUND_SESSION_MESSAGE_QUEUE.delete(sessionId);
-  }
-
-  return nextMessage;
 };
 
 type LatestChatMessage = {
@@ -200,7 +171,7 @@ const isLegacyTaskMasterInstallError = (value: unknown): boolean => {
 };
 
 export function useChatRealtimeHandlers({
-  latestMessage: latestSocketMessage,
+  latestMessage,
   provider,
   selectedProject,
   selectedSession,
@@ -225,7 +196,6 @@ export function useChatRealtimeHandlers({
   onNavigateToSession,
 }: UseChatRealtimeHandlersArgs) {
   const lastProcessedMessageRef = useRef<LatestChatMessage | null>(null);
-  const [queuedReplayMessage, setQueuedReplayMessage] = useState<LatestChatMessage | null>(null);
 
   // Helper: Handle structured assistant content
   const handleStructuredAssistantMessage = (structuredData: any, rawData: any) => {
@@ -432,18 +402,14 @@ export function useChatRealtimeHandlers({
   };
 
   useEffect(() => {
-    const isReplayMessage = Boolean(queuedReplayMessage);
-    const latestMessage = queuedReplayMessage || latestSocketMessage;
     if (!latestMessage) {
       return;
     }
 
-    if (!isReplayMessage && lastProcessedMessageRef.current === latestMessage) {
+    if (lastProcessedMessageRef.current === latestMessage) {
       return;
     }
-    if (!isReplayMessage) {
-      lastProcessedMessageRef.current = latestMessage;
-    }
+    lastProcessedMessageRef.current = latestMessage;
 
     const messageData = latestMessage.data?.message || latestMessage.data;
     const structuredMessageData =
@@ -591,8 +557,6 @@ export function useChatRealtimeHandlers({
       if (latestMessage.sessionId !== activeViewSessionId) {
         if (latestMessage.sessionId && lifecycleMessageTypes.has(String(latestMessage.type))) {
           handleBackgroundLifecycle(latestMessage.sessionId);
-        } else if (latestMessage.sessionId) {
-          enqueueBackgroundSessionMessage(latestMessage.sessionId, latestMessage);
         }
         return;
       }
@@ -1480,36 +1444,10 @@ export function useChatRealtimeHandlers({
       default:
         break;
     }
-
-    if (isReplayMessage) {
-      setQueuedReplayMessage(null);
-    }
   }, [
     latestMessage, provider, selectedProject, selectedSession, currentSessionId, setCurrentSessionId,
     setChatMessages, setIsLoading, setCanAbortSession, setClaudeStatus, setStatusTextOverride, setTokenBudget,
     setIsSystemSessionChange, setPendingPermissionRequests, onSessionInactive, onSessionProcessing,
     onSessionNotProcessing, onSessionStatusResolved, onReplaceTemporarySession, onNavigateToSession,
   ]);
-
-  useEffect(() => {
-    if (queuedReplayMessage) {
-      return;
-    }
-
-    const activeViewSessionId =
-      selectedSession?.id || currentSessionId || pendingViewSessionRef.current?.sessionId || null;
-    if (!activeViewSessionId) {
-      return;
-    }
-
-    const nextQueuedMessage = shiftBackgroundSessionMessage(activeViewSessionId);
-    if (!nextQueuedMessage) {
-      return;
-    }
-
-    const timeoutId = window.setTimeout(() => {
-      setQueuedReplayMessage(nextQueuedMessage);
-    }, 150);
-    return () => clearTimeout(timeoutId);
-  }, [queuedReplayMessage, selectedSession?.id, currentSessionId, pendingViewSessionRef]);
 }
