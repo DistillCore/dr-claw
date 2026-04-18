@@ -1,30 +1,27 @@
-import React, { useEffect } from 'react';
+import React, { useCallback, useEffect } from 'react';
 
 import ChatInterface from '../../chat/view/ChatInterface';
-import FileTree from '../../FileTree';
-import GitPanel from '../../GitPanel';
-import ResearchLab from '../../ResearchLab';
 import SkillsDashboard from '../../SkillsDashboard';
-import ComputePanel from '../../ComputePanel';
+import AutoResearchHub from '../../AutoResearchHub';
+import ComputeResourcesDashboard from '../../compute-dashboard/ComputeResourcesDashboard';
 import ErrorBoundary from '../../ErrorBoundary';
 import SurveyPage from '../../survey/view/SurveyPage';
 import ProjectDashboard from '../../project-dashboard/view/ProjectDashboard';
 import TrashDashboard from '../../project-dashboard/view/TrashDashboard';
 import NewsDashboard from '../../news-dashboard/view/NewsDashboard';
 
+import ChatTabBar from '../../chat/view/ChatTabBar';
+import { useChatTabs } from '../../../hooks/useChatTabs';
 import MainContentHeader from './subcomponents/MainContentHeader';
 import MainContentStateView from './subcomponents/MainContentStateView';
-import EditorSidebar from './subcomponents/EditorSidebar';
-import ShellWorkspace from './subcomponents/ShellWorkspace';
 import type { MainContentProps } from '../types/types';
+import { resolveChatTabSyncAction } from './chatTabSync';
 
 import { useTaskMaster } from '../../../contexts/TaskMasterContext';
 import { useUiPreferences } from '../../../hooks/useUiPreferences';
-import { useEditorSidebar } from '../hooks/useEditorSidebar';
 import type { Project } from '../../../types/app';
 import type { Reference } from '../../references/types';
-
-const AnyGitPanel = GitPanel as any;
+import { queueSkillCommandDraft } from '../../../utils/skillCommandDraft';
 
 type TaskMasterContextValue = {
   currentProject?: Project | null;
@@ -64,6 +61,9 @@ function MainContent({
   onChatFromReference,
   newSessionMode,
   onNewSessionModeChange,
+  sessionNavigationSource,
+  onResetNavigationSource,
+  onNewSession,
 }: MainContentProps) {
   const { preferences } = useUiPreferences();
   const { autoExpandTools, showRawParameters, showThinking, autoScrollToBottom, sendByCtrlEnter } = preferences;
@@ -71,19 +71,73 @@ function MainContent({
   const { currentProject, setCurrentProject } = useTaskMaster() as TaskMasterContextValue;
   const shouldShowTasksTab = false;
 
-  const {
-    editingFile,
-    editorWidth,
-    editorExpanded,
-    resizeHandleRef,
-    handleFileOpen,
-    handleCloseEditor,
-    handleToggleEditorExpand,
-    handleResizeStart,
-  } = useEditorSidebar({
+  const handleActivateBlankTab = useCallback(() => {
+    if (selectedProject && onNewSession) {
+      onNewSession(selectedProject, newSessionMode);
+    }
+  }, [selectedProject, onNewSession, newSessionMode]);
+
+  const chatTabs = useChatTabs(
     selectedProject,
-    isMobile,
-  });
+    onNavigateToSession,
+    handleActivateBlankTab,
+  );
+
+  const {
+    activeTab: chatActiveTab,
+    tabs: chatTabList,
+    openNewTab,
+    openTab,
+    updateActiveTabSession,
+    switchTab,
+    closeTab,
+  } = chatTabs;
+  const chatActiveTabSessionId = chatActiveTab?.sessionId;
+  const chatTabCount = chatTabList.length;
+
+  // Sync selectedSession changes into tab state using navigation source to
+  // distinguish user sidebar clicks from system session-created events. Runs
+  // on first render too so a pre-selected session (e.g. from URL) gets a tab.
+  useEffect(() => {
+    const currId = selectedSession?.id ?? null;
+
+    const action = resolveChatTabSyncAction({
+      activeAppTab: activeTab,
+      hasSelectedProject: Boolean(selectedProject),
+      nextSessionId: currId,
+      activeChatTabSessionId: chatActiveTabSessionId,
+      tabCount: chatTabCount,
+      navigationSource: sessionNavigationSource,
+    });
+
+    if (action === 'open-new-tab') {
+      openNewTab();
+    } else if (action === 'update-active-tab-session' && currId && selectedProject) {
+      updateActiveTabSession(selectedSession!, selectedProject);
+    } else if (action === 'open-tab' && currId && selectedProject) {
+      openTab(selectedSession!, selectedProject);
+    }
+
+    if (action !== 'noop') {
+      onResetNavigationSource();
+    }
+  }, [
+    selectedSession,
+    selectedProject,
+    activeTab,
+    sessionNavigationSource,
+    chatActiveTabSessionId,
+    chatTabCount,
+    openNewTab,
+    openTab,
+    updateActiveTabSession,
+    onResetNavigationSource,
+  ]);
+
+  // When the active tab has no session (new chat via [+]), pass null to ChatInterface
+  const effectiveSession = chatActiveTabSessionId === null
+    ? null
+    : selectedSession;
 
   useEffect(() => {
     if (selectedProject && selectedProject !== currentProject) {
@@ -91,9 +145,11 @@ function MainContent({
     }
   }, [selectedProject, currentProject, setCurrentProject]);
 
+  // Migration shim: redirect legacy tab values from before PR #130 merged
+  // Research Lab and Files into the sidebar. Safe to remove after 2026-07-01.
   useEffect(() => {
-    if (activeTab === 'tasks') {
-      setActiveTab('researchlab');
+    if (activeTab === 'tasks' || activeTab === 'researchlab' || activeTab === 'files' || activeTab === 'shell' || activeTab === 'git') {
+      setActiveTab('chat');
     }
   }, [activeTab, setActiveTab]);
 
@@ -117,14 +173,33 @@ function MainContent({
         <div className="flex-1 min-h-0 overflow-hidden">
           <ProjectDashboard
             projects={projects}
-            onProjectAction={(project, tab, sessionId, sessionProvider) => {
+            onProjectAction={(project, tab, sessionId) => {
               onProjectSelect(project);
               setActiveTab(tab);
               if (sessionId && tab === 'chat') {
-                onNavigateToSession(sessionId, sessionProvider, project.name);
+                onNavigateToSession(sessionId, undefined, project.name);
               }
             }}
           />
+        </div>
+      </div>
+    );
+  }
+
+  if (activeTab === 'autoresearch') {
+    return (
+      <div className="h-full flex flex-col">
+        <MainContentHeader
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          selectedProject={null}
+          selectedSession={null}
+          shouldShowTasksTab={shouldShowTasksTab}
+          isMobile={isMobile}
+          onMenuClick={onMenuClick}
+        />
+        <div className="flex-1 min-h-0 overflow-hidden">
+          <AutoResearchHub />
         </div>
       </div>
     );
@@ -144,7 +219,17 @@ function MainContent({
         />
 
         <div className="flex-1 min-h-0 overflow-hidden">
-          <SkillsDashboard />
+          <SkillsDashboard
+            onSendToChat={(command: string) => {
+              queueSkillCommandDraft(command);
+              // Select the most recent project if available, then switch to chat
+              const recentProject = projects?.[0];
+              if (recentProject) {
+                onProjectSelect(recentProject);
+              }
+              setActiveTab('chat');
+            }}
+          />
         </div>
       </div>
     );
@@ -199,6 +284,26 @@ function MainContent({
     );
   }
 
+  if (activeTab === 'compute') {
+    return (
+      <div className="h-full flex flex-col">
+        <MainContentHeader
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          selectedProject={null}
+          selectedSession={null}
+          shouldShowTasksTab={shouldShowTasksTab}
+          isMobile={isMobile}
+          onMenuClick={onMenuClick}
+        />
+
+        <div className="flex-1 min-h-0 overflow-hidden">
+          <ComputeResourcesDashboard />
+        </div>
+      </div>
+    );
+  }
+
   if (!selectedProject) {
     return <MainContentStateView mode="empty" isMobile={isMobile} onMenuClick={onMenuClick} />;
   }
@@ -216,16 +321,27 @@ function MainContent({
       />
 
       <div className="flex-1 flex min-h-0 overflow-hidden">
-        <div className={`flex flex-col min-h-0 overflow-hidden ${editorExpanded ? 'hidden' : ''} flex-1`}>
-          <div className={`h-full ${activeTab === 'chat' ? 'block' : 'hidden'}`}>
+        <div className="flex flex-1 flex-col min-h-0 overflow-hidden">
+          <div className={`h-full flex flex-col ${activeTab === 'chat' ? '' : 'hidden'}`}>
+            <ChatTabBar
+              tabs={chatTabList}
+              processingSessions={processingSessions}
+              onSwitchTab={switchTab}
+              onCloseTab={closeTab}
+              onNewTab={() => {
+                if (selectedProject && onNewSession) {
+                  onNewSession(selectedProject);
+                }
+                openNewTab();
+              }}
+            />
             <ErrorBoundary showDetails>
               <ChatInterface
                 selectedProject={selectedProject}
-                selectedSession={selectedSession}
+                selectedSession={effectiveSession}
                 ws={ws}
                 sendMessage={sendMessage}
                 latestMessage={latestMessage}
-                onFileOpen={handleFileOpen}
                 onInputFocusChange={onInputFocusChange}
                 onSessionActive={onSessionActive}
                 onSessionInactive={onSessionInactive}
@@ -241,39 +357,16 @@ function MainContent({
                 autoScrollToBottom={autoScrollToBottom}
                 sendByCtrlEnter={sendByCtrlEnter}
                 externalMessageUpdate={externalMessageUpdate}
-                onShowAllTasks={() => setActiveTab('researchlab')}
+                onStartWorkspaceQa={onStartWorkspaceQa}
                 pendingAutoIntake={pendingAutoIntake}
                 clearPendingAutoIntake={clearPendingAutoIntake}
                 importedProjectAnalysisPrompt={importedProjectAnalysisPrompt}
                 clearImportedProjectAnalysisPrompt={clearImportedProjectAnalysisPrompt}
-                onOpenShellForSession={() => setActiveTab('shell')}
                 newSessionMode={newSessionMode}
                 onNewSessionModeChange={onNewSessionModeChange}
               />
             </ErrorBoundary>
           </div>
-
-          {activeTab === 'files' && (
-            <div className="h-full overflow-hidden">
-              <FileTree
-                selectedProject={selectedProject}
-                onFileOpen={handleFileOpen}
-                onStartWorkspaceQa={onStartWorkspaceQa}
-              />
-            </div>
-          )}
-
-          {activeTab === 'shell' && (
-            <div className="h-full w-full overflow-hidden">
-              <ShellWorkspace project={selectedProject} session={selectedSession} />
-            </div>
-          )}
-
-          {activeTab === 'git' && (
-            <div className="flex-1 min-h-0 overflow-hidden">
-              <AnyGitPanel selectedProject={selectedProject} isMobile={isMobile} onFileOpen={handleFileOpen} />
-            </div>
-          )}
 
           {activeTab === 'survey' && (
             <div className="h-full overflow-hidden">
@@ -284,38 +377,8 @@ function MainContent({
             </div>
           )}
 
-          {activeTab === 'researchlab' && (
-            <div className="h-full overflow-hidden">
-              <ResearchLab
-                selectedProject={selectedProject}
-                onNavigateToChat={() => setActiveTab('chat')}
-              />
-            </div>
-          )}
-
-          {activeTab === 'compute' && (
-            <div className="h-full overflow-hidden">
-              <ComputePanel selectedProject={selectedProject} />
-            </div>
-          )}
-
           <div className={`h-full overflow-hidden ${activeTab === 'preview' ? 'block' : 'hidden'}`} />
         </div>
-
-        <EditorSidebar
-          editingFile={editingFile}
-          isMobile={isMobile}
-          editorExpanded={editorExpanded}
-          editorWidth={editorWidth}
-          resizeHandleRef={resizeHandleRef}
-          onResizeStart={handleResizeStart}
-          onCloseEditor={handleCloseEditor}
-          onToggleEditorExpand={handleToggleEditorExpand}
-          projectPath={selectedProject.path}
-          selectedProject={selectedProject}
-          onStartWorkspaceQa={onStartWorkspaceQa}
-          fillSpace={false}
-        />
       </div>
     </div>
   );

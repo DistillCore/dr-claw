@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Badge } from './ui/badge';
-import { X, Plus, Settings as SettingsIcon, Shield, AlertTriangle, Moon, Sun, Server, Edit3, Trash2, Globe, Terminal, Zap, FolderOpen, LogIn, Key, GitBranch, Check, Mail } from 'lucide-react';
+import { X, Plus, Settings as SettingsIcon, Shield, AlertTriangle, Moon, Sun, Server, Edit3, Trash2, Globe, Terminal, Zap, FolderOpen, LogIn, Key, GitBranch, Check, Mail, Brain } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { useTranslation } from 'react-i18next';
 import CredentialsSettings from './CredentialsSettings';
@@ -11,6 +11,7 @@ import LoginModal from './LoginModal';
 import { authenticatedFetch, api } from '../utils/api';
 import { isTelemetryEnabled, setTelemetryEnabled } from '../utils/telemetry';
 import { writeCliAvailability } from '../utils/cliAvailability';
+import { useDesktop } from '../hooks/useDesktop';
 
 // New settings components
 import AgentListItem from './settings/AgentListItem';
@@ -18,6 +19,7 @@ import AccountContent from './settings/AccountContent';
 import EmailSettingsContent from './settings/EmailSettingsContent';
 import PermissionsContent from './settings/PermissionsContent';
 import McpServersContent from './settings/McpServersContent';
+import MemoryContent from './settings/MemoryContent';
 import LanguageSelector from './LanguageSelector';
 
 const VALID_SETTINGS_TABS = new Set(['agents', 'email', 'appearance', 'git', 'api']);
@@ -25,6 +27,7 @@ const VALID_SETTINGS_TABS = new Set(['agents', 'email', 'appearance', 'git', 'ap
 function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }) {
   const { isDarkMode, toggleDarkMode } = useTheme();
   const { t } = useTranslation('settings');
+  const { isDesktop, selectDirectory, showItemInFolder } = useDesktop();
   const [allowedTools, setAllowedTools] = useState([]);
   const [disallowedTools, setDisallowedTools] = useState([]);
   const [newAllowedTool, setNewAllowedTool] = useState('');
@@ -66,7 +69,7 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }) {
   );
   const [jsonValidationError, setJsonValidationError] = useState('');
   const [selectedAgent, setSelectedAgent] = useState('claude'); // 'claude', 'cursor', or 'codex'
-  const [selectedCategory, setSelectedCategory] = useState('account'); // 'account', 'email', 'permissions', or 'mcp'
+  const [selectedCategory, setSelectedCategory] = useState('account'); // 'account', 'email', 'permissions', 'mcp', or 'memory'
 
   // Code Editor settings
   const [codeEditorTheme, setCodeEditorTheme] = useState(() =>
@@ -130,7 +133,10 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }) {
     cliCommand: 'claude',
     installHint: null,
     loading: true,
-    error: null
+    error: null,
+    installable: false,
+    docsUrl: null,
+    downloadUrl: null
   });
   const [cursorAuthStatus, setCursorAuthStatus] = useState({
     authenticated: false,
@@ -139,7 +145,10 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }) {
     cliCommand: 'agent',
     installHint: null,
     loading: true,
-    error: null
+    error: null,
+    installable: false,
+    docsUrl: null,
+    downloadUrl: null
   });
   const [codexAuthStatus, setCodexAuthStatus] = useState({
     authenticated: false,
@@ -148,13 +157,37 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }) {
     cliCommand: 'codex',
     installHint: null,
     loading: true,
-    error: null
+    error: null,
+    installable: false,
+    docsUrl: null,
+    downloadUrl: null
   });
   const [geminiAuthStatus, setGeminiAuthStatus] = useState({
     authenticated: false,
     email: null,
     cliAvailable: true,
     cliCommand: 'gemini',
+    installHint: null,
+    loading: true,
+    error: null,
+    installable: false,
+    docsUrl: null,
+    downloadUrl: null
+  });
+  const [openrouterAuthStatus, setOpenrouterAuthStatus] = useState({
+    authenticated: false,
+    email: null,
+    cliAvailable: true,
+    cliCommand: 'openrouter',
+    installHint: null,
+    loading: true,
+    error: null
+  });
+  const [localAuthStatus, setLocalAuthStatus] = useState({
+    authenticated: false,
+    email: null,
+    cliAvailable: true,
+    cliCommand: null,
     installHint: null,
     loading: true,
     error: null
@@ -168,6 +201,9 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }) {
     installHint: null,
     loading: false,
     error: null,
+    installable: false,
+    docsUrl: null,
+    downloadUrl: null,
     ...overrides
   });
 
@@ -547,6 +583,8 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }) {
       checkCursorAuthStatus();
       checkCodexAuthStatus();
       checkGeminiAuthStatus();
+      checkOpenRouterAuthStatus();
+      checkLocalAuthStatus();
       setActiveTab(VALID_SETTINGS_TABS.has(initialTab) ? initialTab : 'agents');
     }
   }, [isOpen, initialTab]);
@@ -682,7 +720,10 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }) {
           cliCommand: data.cliCommand || 'claude',
           installHint: data.installHint || null,
           loading: false,
-          error: data.error || null
+          error: data.error || null,
+          installable: data.installable === true,
+          docsUrl: data.docsUrl || null,
+          downloadUrl: data.downloadUrl || null
         });
         writeCliAvailability('claude', {
           cliAvailable: data.cliAvailable !== false,
@@ -717,7 +758,10 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }) {
           cliCommand: data.cliCommand || 'agent',
           installHint: data.installHint || null,
           loading: false,
-          error: data.error || null
+          error: data.error || null,
+          installable: data.installable === true,
+          docsUrl: data.docsUrl || null,
+          downloadUrl: data.downloadUrl || null
         });
         writeCliAvailability('cursor', {
           cliAvailable: data.cliAvailable !== false,
@@ -752,7 +796,10 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }) {
           cliCommand: data.cliCommand || 'codex',
           installHint: data.installHint || null,
           loading: false,
-          error: data.error || null
+          error: data.error || null,
+          installable: data.installable === true,
+          docsUrl: data.docsUrl || null,
+          downloadUrl: data.downloadUrl || null
         });
         writeCliAvailability('codex', {
           cliAvailable: data.cliAvailable !== false,
@@ -787,7 +834,10 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }) {
           cliCommand: data.cliCommand || 'gemini',
           installHint: data.installHint || null,
           loading: false,
-          error: data.error || null
+          error: data.error || null,
+          installable: data.installable === true,
+          docsUrl: data.docsUrl || null,
+          downloadUrl: data.downloadUrl || null
         });
         writeCliAvailability('gemini', {
           cliAvailable: data.cliAvailable !== false,
@@ -809,31 +859,130 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }) {
     }
   };
 
+  const checkOpenRouterAuthStatus = async () => {
+    try {
+      const response = await authenticatedFetch('/api/cli/openrouter/status');
+
+      if (response.ok) {
+        const data = await response.json();
+        setOpenrouterAuthStatus({
+          authenticated: data.authenticated,
+          email: data.email,
+          cliAvailable: data.cliAvailable !== false,
+          cliCommand: data.cliCommand || 'openrouter',
+          installHint: data.installHint || null,
+          loading: false,
+          error: data.error || null
+        });
+        writeCliAvailability('openrouter', {
+          cliAvailable: data.cliAvailable !== false,
+          cliCommand: data.cliCommand || 'openrouter',
+          installHint: data.installHint || null,
+        });
+      } else {
+        setOpenrouterAuthStatus(buildDefaultAuthState({
+          cliCommand: 'openrouter',
+          error: 'Failed to check authentication status'
+        }));
+      }
+    } catch (error) {
+      console.error('Error checking OpenRouter auth status:', error);
+      setOpenrouterAuthStatus(buildDefaultAuthState({
+        cliCommand: 'openrouter',
+        error: error.message
+      }));
+    }
+  };
+
+  const refreshProviderStatus = async (provider) => {
+    if (provider === 'claude') {
+      await checkClaudeAuthStatus();
+      return;
+    }
+
+    if (provider === 'cursor') {
+      await checkCursorAuthStatus();
+      return;
+    }
+
+    if (provider === 'codex') {
+      await checkCodexAuthStatus();
+      return;
+    }
+
+    if (provider === 'gemini') {
+      await checkGeminiAuthStatus();
+    }
+  };
+
+  const checkLocalAuthStatus = async () => {
+    try {
+      const response = await authenticatedFetch('/api/cli/local/status');
+
+      if (response.ok) {
+        const data = await response.json();
+        setLocalAuthStatus({
+          authenticated: data.authenticated,
+          email: data.email,
+          cliAvailable: true,
+          cliCommand: null,
+          installHint: data.installHint || null,
+          loading: false,
+          error: data.error || null
+        });
+        writeCliAvailability('local', {
+          cliAvailable: true,
+          cliCommand: null,
+          installHint: data.installHint || null,
+        });
+      } else {
+        setLocalAuthStatus({
+          authenticated: false,
+          email: null,
+          cliAvailable: true,
+          cliCommand: null,
+          installHint: 'Install Ollama from https://ollama.com',
+          loading: false,
+          error: 'Could not check Ollama status'
+        });
+      }
+    } catch (error) {
+      console.error('Error checking Local GPU auth status:', error);
+      setLocalAuthStatus({
+        authenticated: false,
+        email: null,
+        cliAvailable: true,
+        cliCommand: null,
+        installHint: 'Install Ollama from https://ollama.com',
+        loading: false,
+        error: error.message
+      });
+    }
+  };
+
+  const getDefaultProject = () => projects?.[0] || { name: 'default', fullPath: '' };
+
   const handleClaudeLogin = () => {
-    if (claudeAuthStatus.cliAvailable === false) return;
     setLoginProvider('claude');
-    setSelectedProject(projects?.[0] || { name: 'default', fullPath: process.cwd() });
+    setSelectedProject(getDefaultProject());
     setShowLoginModal(true);
   };
 
   const handleCursorLogin = () => {
-    if (cursorAuthStatus.cliAvailable === false) return;
     setLoginProvider('cursor');
-    setSelectedProject(projects?.[0] || { name: 'default', fullPath: process.cwd() });
+    setSelectedProject(getDefaultProject());
     setShowLoginModal(true);
   };
 
   const handleCodexLogin = () => {
-    if (codexAuthStatus.cliAvailable === false) return;
     setLoginProvider('codex');
-    setSelectedProject(projects?.[0] || { name: 'default', fullPath: process.cwd() });
+    setSelectedProject(getDefaultProject());
     setShowLoginModal(true);
   };
 
   const handleGeminiLogin = () => {
-    if (geminiAuthStatus.cliAvailable === false) return;
     setLoginProvider('gemini');
-    setSelectedProject(projects?.[0] || { name: 'default', fullPath: process.cwd() });
+    setSelectedProject(getDefaultProject());
     setShowLoginModal(true);
   };
 
@@ -1195,8 +1344,6 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }) {
             {/* Appearance Tab */}
             {activeTab === 'appearance' && (
               <div className="space-y-6 md:space-y-8">
-               {activeTab === 'appearance' && (
-  <div className="space-y-6 md:space-y-8">
     {/* Theme Settings */}
     <div className="space-y-4">
       <div className="bg-gray-50 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
@@ -1337,6 +1484,29 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }) {
             placeholder={workspaceRootDefault}
             className="flex-1 text-sm font-mono"
           />
+          {isDesktop && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={async () => {
+                const selected = await selectDirectory({
+                  title: t('appearanceSettings.defaultProjectPath.browseTitle', 'Select Default Project Folder'),
+                  defaultPath: workspaceRoot || workspaceRootDefault || undefined,
+                });
+                if (selected) {
+                  setWorkspaceRoot(selected);
+                  setWorkspaceRootSaved(false);
+                  setWorkspaceRootError('');
+                  saveWorkspaceRoot(selected);
+                }
+              }}
+              className="whitespace-nowrap"
+              title={t('appearanceSettings.defaultProjectPath.browse', 'Browse')}
+            >
+              <FolderOpen className="w-4 h-4 mr-1" />
+              {t('appearanceSettings.defaultProjectPath.browse', 'Browse')}
+            </Button>
+          )}
           <Button
             variant="outline"
             size="sm"
@@ -1512,9 +1682,6 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }) {
         </div>
       </div>
     </div>
-  </div>
-)}
-
               </div>
             )}
 
@@ -1551,6 +1718,20 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }) {
                       onClick={() => setSelectedAgent('gemini')}
                       isMobile={true}
                     />
+                    <AgentListItem
+                      agentId="openrouter"
+                      authStatus={openrouterAuthStatus}
+                      isSelected={selectedAgent === 'openrouter'}
+                      onClick={() => setSelectedAgent('openrouter')}
+                      isMobile={true}
+                    />
+                    <AgentListItem
+                      agentId="local"
+                      authStatus={localAuthStatus}
+                      isSelected={selectedAgent === 'local'}
+                      onClick={() => setSelectedAgent('local')}
+                      isMobile={true}
+                    />
                   </div>
                 </div>
 
@@ -1574,6 +1755,18 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }) {
                       authStatus={geminiAuthStatus}
                       isSelected={selectedAgent === 'gemini'}
                       onClick={() => setSelectedAgent('gemini')}
+                    />
+                    <AgentListItem
+                      agentId="openrouter"
+                      authStatus={openrouterAuthStatus}
+                      isSelected={selectedAgent === 'openrouter'}
+                      onClick={() => setSelectedAgent('openrouter')}
+                    />
+                    <AgentListItem
+                      agentId="local"
+                      authStatus={localAuthStatus}
+                      isSelected={selectedAgent === 'local'}
+                      onClick={() => setSelectedAgent('local')}
                     />
                   </div>
                 </div>
@@ -1613,6 +1806,17 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }) {
                       >
                         {t('tabs.mcpServers')}
                       </button>
+                      <button
+                        onClick={() => setSelectedCategory('memory')}
+                        className={`px-3 md:px-4 py-2 md:py-3 text-xs md:text-sm font-medium border-b-2 transition-colors whitespace-nowrap flex items-center gap-1.5 ${
+                          selectedCategory === 'memory'
+                            ? 'border-blue-600 text-blue-600 dark:text-blue-400'
+                            : 'border-transparent text-muted-foreground hover:text-foreground'
+                        }`}
+                      >
+                        <Brain className="w-4 h-4" />
+                        Memory
+                      </button>
                     </div>
                   </div>
 
@@ -1626,12 +1830,16 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }) {
                           selectedAgent === 'claude' ? claudeAuthStatus :
                           selectedAgent === 'cursor' ? cursorAuthStatus :
                           selectedAgent === 'gemini' ? geminiAuthStatus :
+                          selectedAgent === 'openrouter' ? openrouterAuthStatus :
+                          selectedAgent === 'local' ? localAuthStatus :
                           codexAuthStatus
                         }
                         onLogin={
                           selectedAgent === 'claude' ? handleClaudeLogin :
                           selectedAgent === 'cursor' ? handleCursorLogin :
                           selectedAgent === 'gemini' ? handleGeminiLogin :
+                          selectedAgent === 'openrouter' ? (() => {}) :
+                          selectedAgent === 'local' ? checkLocalAuthStatus :
                           handleCodexLogin
                         }
                       />
@@ -1728,6 +1936,11 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }) {
                         onEdit={(server) => openCodexMcpForm(server)}
                         onDelete={(serverId) => handleCodexMcpDelete(serverId)}
                       />
+                    )}
+
+                    {/* Memory Category */}
+                    {selectedCategory === 'memory' && (
+                      <MemoryContent />
                     )}
                   </div>
                 </div>
@@ -2267,6 +2480,42 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }) {
           loginProvider === 'gemini' ? geminiAuthStatus.installHint :
           null
         }
+        installable={
+          loginProvider === 'claude' ? claudeAuthStatus.installable === true :
+          loginProvider === 'cursor' ? cursorAuthStatus.installable === true :
+          loginProvider === 'codex' ? codexAuthStatus.installable === true :
+          loginProvider === 'gemini' ? geminiAuthStatus.installable === true :
+          false
+        }
+        installerAvailable={
+          loginProvider === 'claude' ? claudeAuthStatus.installerAvailable !== false :
+          loginProvider === 'cursor' ? cursorAuthStatus.installerAvailable !== false :
+          loginProvider === 'codex' ? codexAuthStatus.installerAvailable !== false :
+          loginProvider === 'gemini' ? geminiAuthStatus.installerAvailable !== false :
+          true
+        }
+        installerHint={
+          loginProvider === 'claude' ? claudeAuthStatus.installerHint :
+          loginProvider === 'cursor' ? cursorAuthStatus.installerHint :
+          loginProvider === 'codex' ? codexAuthStatus.installerHint :
+          loginProvider === 'gemini' ? geminiAuthStatus.installerHint :
+          null
+        }
+        docsUrl={
+          loginProvider === 'claude' ? claudeAuthStatus.docsUrl :
+          loginProvider === 'cursor' ? cursorAuthStatus.docsUrl :
+          loginProvider === 'codex' ? codexAuthStatus.docsUrl :
+          loginProvider === 'gemini' ? geminiAuthStatus.docsUrl :
+          null
+        }
+        downloadUrl={
+          loginProvider === 'claude' ? claudeAuthStatus.downloadUrl :
+          loginProvider === 'cursor' ? cursorAuthStatus.downloadUrl :
+          loginProvider === 'codex' ? codexAuthStatus.downloadUrl :
+          loginProvider === 'gemini' ? geminiAuthStatus.downloadUrl :
+          null
+        }
+        onStatusRefresh={() => refreshProviderStatus(loginProvider)}
       />
     </div>
   );

@@ -1,42 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
-
-const ACTIVE_SESSIONS_STORAGE_KEY = 'dr-claw-active-sessions';
-const PROCESSING_SESSIONS_STORAGE_KEY = 'dr-claw-processing-sessions';
-const SESSION_PROTECTION_EVENT = 'dr-claw-session-protection-sync';
-
-const readSharedSessionSet = (storageKey: string) => {
-  if (typeof window === 'undefined') {
-    return new Set<string>();
-  }
-
-  try {
-    const raw = window.localStorage.getItem(storageKey);
-    if (!raw) {
-      return new Set<string>();
-    }
-
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) {
-      return new Set<string>();
-    }
-
-    return new Set(parsed.filter((value): value is string => typeof value === 'string' && value.length > 0));
-  } catch {
-    return new Set<string>();
-  }
-};
-
-const writeSharedSessionSet = (storageKey: string, nextSet: Set<string>) => {
-  if (typeof window === 'undefined') {
-    return;
-  }
-
-  const serialized = JSON.stringify(Array.from(nextSet));
-  window.localStorage.setItem(storageKey, serialized);
-  window.dispatchEvent(new CustomEvent(SESSION_PROTECTION_EVENT, {
-    detail: { storageKey, value: serialized },
-  }));
-};
+import { useCallback, useState } from 'react';
+import { isTemporarySessionId } from '../constants/session';
 
 export function useSessionProtection() {
   const [activeSessions, setActiveSessions] = useState<Set<string>>(() => readSharedSessionSet(ACTIVE_SESSIONS_STORAGE_KEY));
@@ -148,8 +111,8 @@ export function useSessionProtection() {
 
     updateSharedSet(ACTIVE_SESSIONS_STORAGE_KEY, (previous) => {
       const next = new Set<string>();
-      for (const sessionId of previous) {
-        if (!sessionId.startsWith('new-session-')) {
+      for (const sessionId of prev) {
+        if (!isTemporarySessionId(sessionId)) {
           next.add(sessionId);
         }
       }

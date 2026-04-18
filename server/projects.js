@@ -68,12 +68,23 @@ import { open } from 'sqlite';
 import os from 'os';
 import { stripInternalContextPrefix } from './utils/sessionFormatting.js';
 import {
+  buildToolResultMessage,
+  buildToolUseMessage,
+  extractTextContent,
+  normalizeCodexCustomToolCall,
+  normalizeCodexFunctionCall,
+  normalizeExecCommandEvent,
+  normalizePatchApplyEvent,
+  normalizeWebSearchCall,
+} from './utils/codexSessionMessages.js';
+import {
   extractSessionModeFromMetadata,
   extractSessionModeFromText,
   inferSessionModeFromUserMessage,
   normalizeSessionMode,
   readExplicitSessionModeFromMetadata,
 } from './utils/sessionMode.js';
+import { resolveNanoSessionAbsPath, safeNanoSessionFilename } from './nanoSessionPaths.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DRCLAW_SKILLS_DIR = path.join(__dirname, '..', 'skills');
@@ -84,6 +95,8 @@ const CURRENT_DEFAULT_WORKSPACES_ROOT = path.join(os.homedir(), 'dr-claw');
 const DELETED_PROJECTS_CONFIG_KEY = '_deletedProjects';
 
 let projectConfigMutationQueue = Promise.resolve();
+const _lastBootstrapByUser = new Map(); // userId -> timestamp
+const BOOTSTRAP_STALENESS_MS = 60_000; // Only re-scan legacy sources every 60 seconds
 
 function isProjectTrashed(projectInfo = null, dbEntry = null) {
   return Boolean(projectInfo?.trash?.trashedAt || dbEntry?.metadata?.trash?.trashedAt);
@@ -233,6 +246,120 @@ async function bootstrapProjectsIndexFromLegacySources(config, projectDb, userId
   }
 
   return seededCount;
+}
+
+function collectCodexProjectCandidates(sessionsByProject = new Map()) {
+  const candidatesByProject = new Map();
+
+  for (const sessions of sessionsByProject.values()) {
+    if (!Array.isArray(sessions) || sessions.length === 0) {
+      continue;
+    }
+
+    const projectPath = sessions.find((session) => typeof session?.cwd === 'string' && session.cwd.trim())?.cwd?.trim();
+    if (!projectPath) {
+      continue;
+    }
+
+    const projectName = encodeProjectPath(projectPath);
+    if (!projectName) {
+      continue;
+    }
+
+    if (!candidatesByProject.has(projectName)) {
+      candidatesByProject.set(projectName, {
+        projectName,
+        projectPath,
+        sessions: [],
+      });
+    }
+
+    const candidate = candidatesByProject.get(projectName);
+    const sessionIds = new Set(candidate.sessions.map((session) => session.id));
+
+    for (const session of sessions) {
+      if (!session?.id || sessionIds.has(session.id)) {
+        continue;
+      }
+
+      candidate.sessions.push(session);
+      sessionIds.add(session.id);
+    }
+  }
+
+  return Array.from(candidatesByProject.values());
+}
+
+const CODEX_SYNC_COOLDOWN_MS = 30_000;
+let lastCodexSyncTimestamp = 0;
+
+async function syncDiscoveredProjectsFromCodexSessions(config, projectDb, userId = null, visibleWorkspaceRoots = []) {
+  const now = Date.now();
+  if (now - lastCodexSyncTimestamp < CODEX_SYNC_COOLDOWN_MS) {
+    return 0;
+  }
+
+  const { sessionDb } = await import('./database/db.js');
+  const discoveredSessions = await buildCodexSessionsIndex();
+  const candidates = collectCodexProjectCandidates(discoveredSessions);
+  let syncedProjects = 0;
+
+  for (const candidate of candidates) {
+    const { projectName, projectPath, sessions } = candidate;
+
+    if (!projectPath || !await pathExists(projectPath)) {
+      continue;
+    }
+
+    if (visibleWorkspaceRoots.length > 0 && !await isPathWithinWorkspaceRoots(projectPath, visibleWorkspaceRoots)) {
+      continue;
+    }
+
+    const projectInfo = config[projectName];
+    const existing = projectDb.getProjectById(projectName);
+    if (isProjectSuppressed(projectName, config, projectInfo) || isProjectTrashed(projectInfo, existing)) {
+      continue;
+    }
+
+    const ownerUserId = existing?.user_id ?? getProjectOwnerUserId(projectInfo, existing) ?? userId ?? null;
+    const metadata = { ...(existing?.metadata || {}) };
+
+    if (projectInfo?.trash?.trashedAt) {
+      metadata.trash = {
+        ...projectInfo.trash,
+        ownerUserId: projectInfo.trash.ownerUserId ?? ownerUserId,
+      };
+    }
+
+    projectDb.upsertProject(
+      projectName,
+      ownerUserId,
+      existing?.display_name || projectInfo?.displayName || null,
+      projectPath,
+      existing?.is_starred || 0,
+      existing?.last_accessed || null,
+      Object.keys(metadata).length > 0 ? metadata : null,
+    );
+
+    for (const session of sessions) {
+      sessionDb.upsertSessionFromSource(session.id, projectName, 'codex', {
+        displayName: session.summary || session.name || 'Codex Session',
+        lastActivity: session.lastActivity || new Date(),
+        messageCount: session.messageCount || 0,
+        createdAt: session.createdAt || session.lastActivity || new Date(),
+        metadata: {
+          projectPath,
+          sessionMode: normalizeSessionMode(session.mode),
+          indexState: 'synced',
+        },
+      });
+    }
+
+    syncedProjects += 1;
+  }
+
+  lastCodexSyncTimestamp = Date.now();
+  return syncedProjects;
 }
 
 function buildTrashEntry(projectName, projectInfo = null, dbEntry = null) {
@@ -900,6 +1027,34 @@ function mapIndexedSessionToProjectSession(session, provider) {
     };
   }
 
+  if (provider === 'openrouter') {
+    return {
+      id: session.id,
+      summary: baseName || 'OpenRouter Session',
+      name: baseName || 'OpenRouter Session',
+      createdAt,
+      lastActivity,
+      messageCount,
+      mode,
+      tags,
+      __provider: 'openrouter',
+    };
+  }
+
+  if (provider === 'nano') {
+    return {
+      id: session.id,
+      summary: baseName || 'Nano Claude Code Session',
+      name: baseName || 'Nano Claude Code Session',
+      createdAt,
+      lastActivity,
+      messageCount,
+      mode,
+      tags,
+      __provider: 'nano',
+    };
+  }
+
   return {
     id: session.id,
     summary: baseName || 'New Session',
@@ -920,6 +1075,10 @@ function getSessionPlaceholderName(provider) {
       return 'Codex Session';
     case 'gemini':
       return 'Gemini Session';
+    case 'openrouter':
+      return 'OpenRouter Session';
+    case 'nano':
+      return 'Nano Claude Code Session';
     default:
       return 'New Session';
   }
@@ -1043,6 +1202,84 @@ async function reconcileGeminiSessionIndex(projectPath, options = {}) {
   });
 }
 
+async function reconcileOpenRouterSessionIndex(projectPath, options = {}) {
+  const { sessionId = null, projectName = null } = options;
+  if (!sessionId) return;
+  const resolvedProjectName = projectName || encodeProjectPath(projectPath);
+  const sessionFile = path.join(os.homedir(), '.dr-claw', 'openrouter-sessions', `${sessionId}.jsonl`);
+  try {
+    const raw = await fs.readFile(sessionFile, 'utf-8');
+    const lines = raw.trim().split('\n').filter(Boolean);
+    let displayName = null;
+    let messageCount = 0;
+    let lastActivity = null;
+    for (const line of lines) {
+      try {
+        const entry = JSON.parse(line);
+        if (entry.role === 'user' && !displayName) {
+          const raw = (entry.content || '').replace(/\s*\[Context:[^\]]*\]\s*/gi, '').trim();
+          displayName = raw.slice(0, 100) || null;
+        }
+        if (entry.role === 'user' || entry.role === 'assistant') {
+          messageCount++;
+        }
+        if (entry.ts) lastActivity = entry.ts;
+      } catch {}
+    }
+    const { sessionDb } = await import('./database/db.js');
+    sessionDb.upsertSession(
+      sessionId,
+      resolvedProjectName,
+      'openrouter',
+      displayName || 'OpenRouter Session',
+      lastActivity || new Date().toISOString(),
+      messageCount,
+      null,
+    );
+  } catch (err) {
+    console.warn(`[OpenRouter] Failed to reconcile session ${sessionId}:`, err.message);
+  }
+}
+
+async function reconcileLocalGPUSessionIndex(projectPath, options = {}) {
+  const { sessionId = null, projectName = null } = options;
+  if (!sessionId) return;
+  const resolvedProjectName = projectName || encodeProjectPath(projectPath);
+  const sessionFile = path.join(os.homedir(), '.dr-claw', 'localgpu-sessions', `${sessionId}.jsonl`);
+  try {
+    const raw = await fs.readFile(sessionFile, 'utf-8');
+    const lines = raw.trim().split('\n').filter(Boolean);
+    let displayName = null;
+    let messageCount = 0;
+    let lastActivity = null;
+    for (const line of lines) {
+      try {
+        const entry = JSON.parse(line);
+        if (entry.role === 'user' && !displayName) {
+          const raw = (entry.content || '').replace(/\s*\[Context:[^\]]*\]\s*/gi, '').trim();
+          displayName = raw.slice(0, 100) || null;
+        }
+        if (entry.role === 'user' || entry.role === 'assistant') {
+          messageCount++;
+        }
+        if (entry.ts) lastActivity = entry.ts;
+      } catch {}
+    }
+    const { sessionDb } = await import('./database/db.js');
+    sessionDb.upsertSession(
+      sessionId,
+      resolvedProjectName,
+      'local',
+      displayName || 'Local GPU Session',
+      lastActivity || new Date().toISOString(),
+      messageCount,
+      null,
+    );
+  } catch (err) {
+    console.warn(`[LocalGPU] Failed to reconcile session ${sessionId}:`, err.message);
+  }
+}
+
 async function reconcileCodexSessionIndex(projectPath, options = {}) {
   const { limit = 0, sessionId = null, previousSessionId = null, projectName = null } = options;
   const sessions = await getCodexSessions(projectPath, {
@@ -1071,18 +1308,22 @@ async function getProjects(userId, progressCallback = null) {
   let totalProjects = 0;
   let processedProjects = 0;
 
-  let dbProjects = projectDb.getAllProjects(userId || null);
-  if (dbProjects.length === 0) {
-    const seededCount = await bootstrapProjectsIndexFromLegacySources(
+  // Sync from legacy sources so CLI-created projects appear in the web UI.
+  // Only re-scan if the last bootstrap was more than 60 seconds ago to avoid
+  // O(N) filesystem walks on every getProjects() call. See #86.
+  const now = Date.now();
+  const userKey = userId || '__anonymous__';
+  if (now - (_lastBootstrapByUser.get(userKey) || 0) > BOOTSTRAP_STALENESS_MS) {
+    await bootstrapProjectsIndexFromLegacySources(
       config,
       projectDb,
       userId || null,
       visibleWorkspaceRoots,
     );
-    if (seededCount > 0) {
-      dbProjects = projectDb.getAllProjects(userId || null);
-    }
+    _lastBootstrapByUser.set(userKey, now);
   }
+  await syncDiscoveredProjectsFromCodexSessions(config, projectDb, userId || null, visibleWorkspaceRoots);
+  const dbProjects = projectDb.getAllProjects(userId || null);
 
   try {
     const visibleProjects = [];
@@ -1158,6 +1399,9 @@ async function getProjects(userId, progressCallback = null) {
       const cursorSessions = projectSessions.filter((session) => session.provider === 'cursor');
       const codexSessions = projectSessions.filter((session) => session.provider === 'codex');
       const geminiSessions = projectSessions.filter((session) => session.provider === 'gemini');
+      const openrouterSessions = projectSessions.filter((session) => session.provider === 'openrouter');
+      const localSessions = projectSessions.filter((session) => session.provider === 'local');
+      const nanoSessions = projectSessions.filter((session) => session.provider === 'nano');
 
       project.sessions = claudeSessions.slice(0, 5).map((session) => mapIndexedSessionToProjectSession(session, 'claude'));
       project.sessionMeta = {
@@ -1167,6 +1411,9 @@ async function getProjects(userId, progressCallback = null) {
       project.cursorSessions = cursorSessions.slice(0, 5).map((session) => mapIndexedSessionToProjectSession(session, 'cursor'));
       project.codexSessions = codexSessions.slice(0, 5).map((session) => mapIndexedSessionToProjectSession(session, 'codex'));
       project.geminiSessions = geminiSessions.slice(0, 5).map((session) => mapIndexedSessionToProjectSession(session, 'gemini'));
+      project.openrouterSessions = openrouterSessions.slice(0, 5).map((session) => mapIndexedSessionToProjectSession(session, 'openrouter'));
+      project.localSessions = localSessions.slice(0, 5).map((session) => mapIndexedSessionToProjectSession(session, 'local'));
+      project.nanoSessions = nanoSessions.slice(0, 5).map((session) => mapIndexedSessionToProjectSession(session, 'nano'));
 
       const taskmasterResult = await detectTaskMasterFolder(actualProjectDir).catch(() => null);
 
@@ -1651,6 +1898,119 @@ async function parseAgentTools(filePath) {
   return tools;
 }
 
+function extractNanoMessageText(content) {
+  if (typeof content === 'string') {
+    return content;
+  }
+  if (!Array.isArray(content)) {
+    return '';
+  }
+  const parts = [];
+  for (const block of content) {
+    if (typeof block === 'string') {
+      parts.push(block);
+    } else if (block && typeof block === 'object') {
+      if (block.type === 'text' && block.text) {
+        parts.push(String(block.text));
+      }
+    }
+  }
+  return parts.join('\n');
+}
+
+/**
+ * Real cwd for Nano session files. encodeProjectPath ↔ simple decode in extractProjectDirectory
+ * is lossy; session metadata and projects.path store the authoritative path.
+ */
+async function resolveNanoProjectDirectory(projectName, sessionId) {
+  const { sessionDb, projectDb } = await import('./database/db.js');
+  const session = sessionDb.getSessionById(sessionId);
+  const metaPath = session?.metadata?.projectPath;
+  if (typeof metaPath === 'string' && metaPath.trim()) {
+    return metaPath.trim();
+  }
+  const projectRow = projectDb.getProjectById(projectName);
+  if (projectRow?.path && typeof projectRow.path === 'string' && projectRow.path.trim()) {
+    return projectRow.path.trim();
+  }
+  return extractProjectDirectory(projectName);
+}
+
+/** Prefer ~/.dr-claw/nano-sessions; fall back to legacy <projectCwd>/drclaw-nano-*.json */
+async function findNanoSessionStoragePath(projectName, sessionId) {
+  const central = resolveNanoSessionAbsPath(sessionId);
+  if (central) {
+    try {
+      await fs.access(central);
+      return central;
+    } catch (_) {
+      // legacy below
+    }
+  }
+  const basename = safeNanoSessionFilename(sessionId);
+  if (!basename) {
+    return null;
+  }
+  try {
+    const projectPath = await resolveNanoProjectDirectory(projectName, sessionId);
+    const legacy = path.join(projectPath, basename);
+    await fs.access(legacy);
+    return legacy;
+  } catch (_) {
+    return null;
+  }
+}
+
+async function unlinkNanoSessionFilesEverywhere(projectName, sessionId) {
+  let deleted = false;
+  const central = resolveNanoSessionAbsPath(sessionId);
+  if (central) {
+    try {
+      await fs.unlink(central);
+      deleted = true;
+    } catch (e) {
+      if (e?.code !== 'ENOENT') {
+        throw e;
+      }
+    }
+  }
+  const basename = safeNanoSessionFilename(sessionId);
+  if (basename) {
+    try {
+      const projectPath = await resolveNanoProjectDirectory(projectName, sessionId);
+      const legacy = path.join(projectPath, basename);
+      await fs.unlink(legacy);
+      deleted = true;
+    } catch (e) {
+      if (e?.code !== 'ENOENT') {
+        throw e;
+      }
+    }
+  }
+  return deleted;
+}
+
+/** Maps nano-claude-code session.json (title, messages[]) to Dr. Claw chat message shape. */
+function nanoSessionJsonToMessages(data) {
+  const rawMessages = Array.isArray(data.messages) ? data.messages : [];
+  const savedAt = data.saved_at || '';
+  const out = [];
+  for (const m of rawMessages) {
+    const role = m.role;
+    if (role !== 'user' && role !== 'assistant') {
+      continue;
+    }
+    const text = extractNanoMessageText(m.content);
+    out.push({
+      type: 'message',
+      role,
+      content: text || '',
+      timestamp: savedAt,
+    });
+  }
+  return out;
+}
+
 // Get messages for a specific session with pagination support
 async function getSessionMessages(projectName, sessionId, limit = null, offset = 0, provider = 'claude', userId = null) {
   console.log(`[DEBUG] getSessionMessages - project: ${projectName}, session: ${sessionId}, provider: ${provider}`);
@@ -1739,6 +2099,182 @@ async function getSessionMessages(projectName, sessionId, limit = null, offset =
       };
     } catch (e) {
       console.warn(`Could not read Gemini session ${sessionId}:`, e.message);
+      return limit === null ? [] : { messages: [], total: 0, hasMore: false };
+    }
+  }
+
+  if (provider === 'openrouter') {
+    const openrouterSessionFile = path.join(os.homedir(), '.dr-claw', 'openrouter-sessions', `${sessionId}.jsonl`);
+    console.log(`[DEBUG] Reading OpenRouter session file: ${openrouterSessionFile}`);
+    try {
+      await fs.access(openrouterSessionFile);
+      const messages = [];
+      const raw = await fs.readFile(openrouterSessionFile, 'utf-8');
+      for (const line of raw.trim().split('\n').filter(Boolean)) {
+        try {
+          const entry = JSON.parse(line);
+          if (entry.role === 'system') continue;
+          if (entry.role === 'user') {
+            messages.push({
+              type: 'message',
+              role: 'user',
+              content: entry.content || '',
+              timestamp: entry.ts,
+            });
+          } else if (entry.role === 'assistant') {
+            // Emit text content as a message if present
+            if (entry.content) {
+              messages.push({
+                type: 'message',
+                role: 'assistant',
+                content: entry.content,
+                timestamp: entry.ts,
+              });
+            }
+            // Emit tool_use entries for each tool call (matches Codex/Claude history format)
+            if (Array.isArray(entry.tool_calls)) {
+              for (const tc of entry.tool_calls) {
+                let toolInput;
+                try { toolInput = tc.function?.arguments || '{}'; } catch { toolInput = '{}'; }
+                messages.push({
+                  type: 'tool_use',
+                  timestamp: entry.ts,
+                  toolName: tc.function?.name || 'unknown',
+                  toolInput,
+                  toolCallId: tc.id,
+                });
+              }
+            }
+          } else if (entry.role === 'tool') {
+            messages.push({
+              type: 'tool_result',
+              role: 'tool',
+              output: entry.content,
+              tool_call_id: entry.tool_call_id,
+              toolCallId: entry.tool_call_id,
+              timestamp: entry.ts,
+            });
+          }
+        } catch {}
+      }
+
+      console.log(`[DEBUG] Found ${messages.length} valid messages in OpenRouter session file`);
+      const total = messages.length;
+      if (limit === null) return messages;
+
+      const startIndex = Math.max(0, total - offset - limit);
+      const endIndex = total - offset;
+      return {
+        messages: messages.slice(startIndex, endIndex),
+        total,
+        hasMore: startIndex > 0,
+        offset,
+        limit,
+      };
+    } catch (e) {
+      console.warn(`Could not read OpenRouter session ${sessionId}:`, e.message);
+      return limit === null ? [] : { messages: [], total: 0, hasMore: false };
+    }
+  }
+
+  if (provider === 'local') {
+    const localSessionFile = path.join(os.homedir(), '.dr-claw', 'localgpu-sessions', `${sessionId}.jsonl`);
+    console.log(`[DEBUG] Reading Local GPU session file: ${localSessionFile}`);
+    try {
+      await fs.access(localSessionFile);
+      const messages = [];
+      const raw = await fs.readFile(localSessionFile, 'utf-8');
+      for (const line of raw.trim().split('\n').filter(Boolean)) {
+        try {
+          const entry = JSON.parse(line);
+          if (entry.role === 'system') continue;
+          if (entry.role === 'user') {
+            messages.push({
+              type: 'message',
+              role: 'user',
+              content: entry.content || '',
+              timestamp: entry.ts,
+            });
+          } else if (entry.role === 'assistant') {
+            if (entry.content) {
+              messages.push({
+                type: 'message',
+                role: 'assistant',
+                content: entry.content,
+                timestamp: entry.ts,
+              });
+            }
+            if (Array.isArray(entry.tool_calls)) {
+              for (const tc of entry.tool_calls) {
+                let toolInput;
+                try { toolInput = tc.function?.arguments || '{}'; } catch { toolInput = '{}'; }
+                messages.push({
+                  type: 'tool_use',
+                  timestamp: entry.ts,
+                  toolName: tc.function?.name || 'unknown',
+                  toolInput,
+                  toolCallId: tc.id,
+                });
+              }
+            }
+          } else if (entry.role === 'tool') {
+            messages.push({
+              type: 'tool_result',
+              role: 'tool',
+              output: entry.content,
+              tool_call_id: entry.tool_call_id,
+              toolCallId: entry.tool_call_id,
+              timestamp: entry.ts,
+            });
+          }
+        } catch {}
+      }
+
+      console.log(`[DEBUG] Found ${messages.length} valid messages in Local GPU session file`);
+      const total = messages.length;
+      if (limit === null) return messages;
+
+      const startIndex = Math.max(0, total - offset - limit);
+      const endIndex = total - offset;
+      return {
+        messages: messages.slice(startIndex, endIndex),
+        total,
+        hasMore: startIndex > 0,
+        offset,
+        limit,
+      };
+    } catch (e) {
+      console.warn(`Could not read Local GPU session ${sessionId}:`, e.message);
+      return limit === null ? [] : { messages: [], total: 0, hasMore: false };
+    }
+  }
+
+  if (String(provider || '').toLowerCase() === 'nano') {
+    console.log('[DEBUG] Reading Nano Claude Code session file');
+    try {
+      const nanoPath = await findNanoSessionStoragePath(projectName, sessionId);
+      if (!nanoPath) {
+        return limit === null ? [] : { messages: [], total: 0, hasMore: false };
+      }
+      const raw = await fs.readFile(nanoPath, 'utf-8');
+      const data = JSON.parse(raw);
+      const messages = nanoSessionJsonToMessages(data);
+      console.log(`[DEBUG] Found ${messages.length} messages in Nano session file at ${nanoPath}`);
+      const total = messages.length;
+      if (limit === null) {
+        return messages;
+      }
+      const startIndex = Math.max(0, total - offset - limit);
+      const endIndex = total - offset;
+      return {
+        messages: messages.slice(startIndex, endIndex),
+        total,
+        hasMore: startIndex > 0,
+        offset,
+        limit,
+      };
+    } catch (e) {
+      console.warn(`Could not read Nano session ${sessionId}:`, e.message);
       return limit === null ? [] : { messages: [], total: 0, hasMore: false };
     }
   }
@@ -1908,6 +2444,83 @@ async function deleteSession(projectName, sessionId, provider = 'claude') {
     }
 
     throw new Error(`Gemini session ${sessionId} not found in file system or index`);
+  }
+
+  if (provider === 'openrouter') {
+    const openrouterSessionFile = path.join(os.homedir(), '.dr-claw', 'openrouter-sessions', `${sessionId}.jsonl`);
+    let deletedFile = false;
+    try {
+      await fs.unlink(openrouterSessionFile);
+      deletedFile = true;
+    } catch (e) {
+      if (e?.code !== 'ENOENT') {
+        console.error(`[OpenRouter] Failed to delete session ${sessionId}:`, e.message);
+        throw new Error(`Failed to delete OpenRouter session: ${e.message}`);
+      }
+    }
+
+    const deletedIndex = indexedSession?.provider === 'openrouter' || deletedFile;
+    if (deletedIndex) {
+      sessionDb.deleteSession(sessionId);
+    }
+
+    if (deletedFile || deletedIndex) {
+      console.log(`[OpenRouter] Deleted session ${sessionId}${deletedFile ? ` file: ${openrouterSessionFile}` : ' from index only'}`);
+      return true;
+    }
+
+    throw new Error(`OpenRouter session ${sessionId} not found in file system or index`);
+  }
+
+  if (provider === 'local') {
+    const localSessionFile = path.join(os.homedir(), '.dr-claw', 'localgpu-sessions', `${sessionId}.jsonl`);
+    let deletedFile = false;
+    try {
+      await fs.unlink(localSessionFile);
+      deletedFile = true;
+    } catch (e) {
+      if (e?.code !== 'ENOENT') {
+        console.error(`[LocalGPU] Failed to delete session ${sessionId}:`, e.message);
+        throw new Error(`Failed to delete Local GPU session: ${e.message}`);
+      }
+    }
+
+    const deletedIndex = indexedSession?.provider === 'local' || deletedFile;
+    if (deletedIndex) {
+      sessionDb.deleteSession(sessionId);
+    }
+
+    if (deletedFile || deletedIndex) {
+      console.log(`[LocalGPU] Deleted session ${sessionId}${deletedFile ? ` file: ${localSessionFile}` : ' from index only'}`);
+      return true;
+    }
+
+    throw new Error(`Local GPU session ${sessionId} not found in file system or index`);
+  }
+
+  if (String(provider || '').toLowerCase() === 'nano') {
+    if (!safeNanoSessionFilename(sessionId)) {
+      throw new Error('Invalid Nano session id');
+    }
+    let deletedFile = false;
+    try {
+      deletedFile = await unlinkNanoSessionFilesEverywhere(projectName, sessionId);
+    } catch (e) {
+      console.error(`[Nano] Failed to delete session ${sessionId}:`, e.message);
+      throw new Error(`Failed to delete Nano session: ${e.message}`);
+    }
+
+    const deletedIndex = indexedSession?.provider === 'nano' || deletedFile;
+    if (deletedIndex) {
+      sessionDb.deleteSession(sessionId);
+    }
+
+    if (deletedFile || deletedIndex) {
+      console.log(`[Nano] Deleted session ${sessionId}${deletedFile ? ' (removed session file if present)' : ' from index only'}`);
+      return true;
+    }
+
+    throw new Error(`Nano session ${sessionId} not found in file system or index`);
   }
 
   const projectDir = path.join(os.homedir(), '.claude', 'projects', projectName);
@@ -2535,38 +3148,63 @@ async function addProjectManually(projectPath, displayName = null, userId = null
 
   const projectName = encodeProjectPath(absolutePath);
 
-  // Check for existing project with the same path (may have legacy encoded ID)
-  const existingByPath = projectDb.getProjectByPath(absolutePath, userId);
-  if (existingByPath) {
-    if (existingByPath.id !== projectName) {
-      // Legacy ID detected — migrate to new encoding
-      projectDb.migrateProjectIdentity(existingByPath.id, projectName, absolutePath);
+  // Check for existing project with the same path (any user or matching user).
+  // A single lookup handles both same-user exact match and cross-user dedup.
+  const existing = projectDb.getProjectByPath(absolutePath, userId);
+
+  if (existing) {
+    // Migrate legacy encoded IDs if needed
+    if (existing.id !== projectName) {
+      projectDb.migrateProjectIdentity(existing.id, projectName, absolutePath);
     }
-    return {
-      name: projectName,
-      path: absolutePath,
-      fullPath: absolutePath,
-      displayName: displayName || existingByPath.display_name || await generateDisplayName(projectName, absolutePath),
-      isManuallyAdded: Boolean(existingByPath.metadata?.manuallyAdded),
-      createdAt: existingByPath.created_at,
-      sessions: [],
-      cursorSessions: [],
-      alreadyExists: true,
-    };
+
+    // If the existing record already belongs to this user, mark as manually
+    // added and return without creating a duplicate.
+    if (existing.user_id === userId || existing.user_id == null) {
+      // Preserve existing values while marking as manually added
+      const mergedMetadata = { ...(existing.metadata || {}), manuallyAdded: true };
+      projectDb.upsertProject(
+        projectName, userId,
+        displayName || existing.display_name,
+        absolutePath,
+        existing.is_starred || 0,
+        existing.last_accessed || new Date().toISOString(),
+        mergedMetadata,
+      );
+
+      return {
+        name: projectName,
+        path: absolutePath,
+        fullPath: absolutePath,
+        displayName: displayName || existing.display_name || await generateDisplayName(projectName, absolutePath),
+        isManuallyAdded: true,
+        createdAt: existing.created_at,
+        sessions: [],
+        cursorSessions: [],
+        alreadyExists: true,
+      };
+    }
   }
 
-  projectDb.upsertProject(projectName, userId, displayName, absolutePath, 0, new Date().toISOString(), { manuallyAdded: true });
+  const effectiveId = existing ? existing.id : projectName;
+
+  // Preserve existing values so the upsert doesn't silently clear them
+  const preservedStarred = existing?.is_starred || 0;
+  const mergedMetadata = { ...(existing?.metadata || {}), manuallyAdded: true };
+  const preservedLastAccessed = existing?.last_accessed || new Date().toISOString();
+
+  projectDb.upsertProject(effectiveId, userId, displayName, absolutePath, preservedStarred, preservedLastAccessed, mergedMetadata);
 
   await mutateProjectConfig((config) => {
-    config[projectName] = {
-      ...(config[projectName] || {}),
+    config[effectiveId] = {
+      ...(config[effectiveId] || {}),
       manuallyAdded: true,
       originalPath: absolutePath,
-      ownerUserId: config[projectName]?.ownerUserId ?? userId ?? null,
+      ownerUserId: config[effectiveId]?.ownerUserId ?? userId ?? null,
     };
 
     if (displayName) {
-      config[projectName].displayName = displayName;
+      config[effectiveId].displayName = displayName;
     }
   });
 
@@ -2579,10 +3217,10 @@ async function addProjectManually(projectPath, displayName = null, userId = null
   } catch (_) {}
 
   return {
-    name: projectName,
+    name: effectiveId,
     path: absolutePath,
     fullPath: absolutePath,
-    displayName: displayName || await generateDisplayName(projectName, absolutePath),
+    displayName: displayName || await generateDisplayName(effectiveId, absolutePath),
     isManuallyAdded: true,
     createdAt: dirCreatedAt,
     sessions: [],
@@ -3208,26 +3846,32 @@ async function getCodexSessionMessages(sessionId, limit = null, offset = 0) {
   try {
     const codexSessionsDir = path.join(os.homedir(), '.codex', 'sessions');
 
-    // Find the session file by searching for the session ID
-    const findSessionFile = async (dir) => {
-      try {
-        const entries = await fs.readdir(dir, { withFileTypes: true });
-        for (const entry of entries) {
-          const fullPath = path.join(dir, entry.name);
-          if (entry.isDirectory()) {
-            const found = await findSessionFile(fullPath);
-            if (found) return found;
-          } else if (entry.name.includes(sessionId) && entry.name.endsWith('.jsonl')) {
-            return fullPath;
-          }
+    const findSessionFileByMetadata = async () => {
+      const jsonlFiles = await findCodexJsonlFiles(codexSessionsDir);
+
+      let filenameMatch = null;
+      for (const filePath of jsonlFiles) {
+        if (path.basename(filePath).includes(sessionId)) {
+          filenameMatch = filePath;
+          break;
         }
-      } catch (error) {
-        // Skip directories we can't read
       }
+
+      if (filenameMatch) {
+        return filenameMatch;
+      }
+
+      for (const filePath of jsonlFiles) {
+        const sessionData = await parseCodexSessionFile(filePath);
+        if (sessionData?.id === sessionId) {
+          return filePath;
+        }
+      }
+
       return null;
     };
 
-    const sessionFilePath = await findSessionFile(codexSessionsDir);
+    const sessionFilePath = await findSessionFileByMetadata();
 
     if (!sessionFilePath) {
       console.warn(`Codex session file not found for session ${sessionId}`);
@@ -3236,27 +3880,46 @@ async function getCodexSessionMessages(sessionId, limit = null, offset = 0) {
 
     const messages = [];
     let tokenUsage = null;
+    const toolUseIndexByCallId = new Map();
+    const toolResultIndexByCallId = new Map();
     const fileStream = fsSync.createReadStream(sessionFilePath);
     const rl = readline.createInterface({
       input: fileStream,
       crlfDelay: Infinity
     });
 
-    // Helper to extract text from Codex content array
-    const extractText = (content) => {
-      if (!Array.isArray(content)) return content;
-      return content
-        .map(item => {
-          if (item.type === 'input_text' || item.type === 'output_text') {
-            return item.text;
-          }
-          if (item.type === 'text') {
-            return item.text;
-          }
-          return '';
-        })
-        .filter(Boolean)
-        .join('\n');
+    const upsertToolUse = (nextMessage) => {
+      const callId = nextMessage?.toolCallId;
+      if (callId && toolUseIndexByCallId.has(callId)) {
+        const existingIndex = toolUseIndexByCallId.get(callId);
+        messages[existingIndex] = {
+          ...messages[existingIndex],
+          ...nextMessage,
+        };
+        return;
+      }
+
+      const nextIndex = messages.push(nextMessage) - 1;
+      if (callId) {
+        toolUseIndexByCallId.set(callId, nextIndex);
+      }
+    };
+
+    const upsertToolResult = (nextMessage) => {
+      const callId = nextMessage?.toolCallId;
+      if (callId && toolResultIndexByCallId.has(callId)) {
+        const existingIndex = toolResultIndexByCallId.get(callId);
+        messages[existingIndex] = {
+          ...messages[existingIndex],
+          ...nextMessage,
+        };
+        return;
+      }
+
+      const nextIndex = messages.push(nextMessage) - 1;
+      if (callId) {
+        toolResultIndexByCallId.set(callId, nextIndex);
+      }
     };
 
     for await (const line of rl) {
@@ -3279,7 +3942,7 @@ async function getCodexSessionMessages(sessionId, limit = null, offset = 0) {
           if (entry.type === 'response_item' && entry.payload?.type === 'message') {
             const content = entry.payload.content;
             const role = entry.payload.role || 'assistant';
-            const textContent = extractText(content);
+            const textContent = extractTextContent(content);
 
             // Skip system context messages (environment_context)
             if (textContent?.includes('<environment_context>')) {
@@ -3307,89 +3970,113 @@ async function getCodexSessionMessages(sessionId, limit = null, offset = 0) {
           // Skip Codex reasoning items - they are brief status notes, not useful to display
 
           if (entry.type === 'response_item' && entry.payload?.type === 'function_call') {
-            let toolName = entry.payload.name;
-            let toolInput = entry.payload.arguments;
-
-            // Map Codex tool names to Claude equivalents
-            if (toolName === 'shell_command') {
-              toolName = 'Bash';
-              try {
-                const args = JSON.parse(entry.payload.arguments);
-                toolInput = JSON.stringify({ command: args.command });
-              } catch (e) {
-                // Keep original if parsing fails
-              }
+            const normalized = normalizeCodexFunctionCall(entry.payload.name, entry.payload.arguments);
+            if (!normalized.skip) {
+              upsertToolUse(buildToolUseMessage(
+                entry.timestamp,
+                normalized.toolName,
+                normalized.toolInput,
+                entry.payload.call_id,
+              ));
             }
-
-            messages.push({
-              type: 'tool_use',
-              timestamp: entry.timestamp,
-              toolName: toolName,
-              toolInput: toolInput,
-              toolCallId: entry.payload.call_id
-            });
           }
 
           if (entry.type === 'response_item' && entry.payload?.type === 'function_call_output') {
-            messages.push({
-              type: 'tool_result',
-              timestamp: entry.timestamp,
-              toolCallId: entry.payload.call_id,
-              output: entry.payload.output
-            });
+            upsertToolResult(buildToolResultMessage(
+              entry.timestamp,
+              entry.payload.call_id,
+              entry.payload.output,
+            ));
           }
 
           if (entry.type === 'response_item' && entry.payload?.type === 'custom_tool_call') {
-            const toolName = entry.payload.name || 'custom_tool';
-            const input = entry.payload.input || '';
-
-            if (toolName === 'apply_patch') {
-              // Parse Codex patch format and convert to Claude Edit format
-              const fileMatch = input.match(/\*\*\* Update File: (.+)/);
-              const filePath = fileMatch ? fileMatch[1].trim() : 'unknown';
-
-              // Extract old and new content from patch
-              const lines = input.split('\n');
-              const oldLines = [];
-              const newLines = [];
-
-              for (const line of lines) {
-                if (line.startsWith('-') && !line.startsWith('---')) {
-                  oldLines.push(line.substring(1));
-                } else if (line.startsWith('+') && !line.startsWith('+++')) {
-                  newLines.push(line.substring(1));
-                }
-              }
-
-              messages.push({
-                type: 'tool_use',
-                timestamp: entry.timestamp,
-                toolName: 'Edit',
-                toolInput: JSON.stringify({
-                  file_path: filePath,
-                  old_string: oldLines.join('\n'),
-                  new_string: newLines.join('\n')
-                }),
-                toolCallId: entry.payload.call_id
-              });
-            } else {
-              messages.push({
-                type: 'tool_use',
-                timestamp: entry.timestamp,
-                toolName: toolName,
-                toolInput: input,
-                toolCallId: entry.payload.call_id
-              });
-            }
+            const normalized = normalizeCodexCustomToolCall(entry.payload.name, entry.payload.input);
+            upsertToolUse(buildToolUseMessage(
+              entry.timestamp,
+              normalized.toolName,
+              normalized.toolInput,
+              entry.payload.call_id,
+            ));
           }
 
           if (entry.type === 'response_item' && entry.payload?.type === 'custom_tool_call_output') {
+            upsertToolResult(buildToolResultMessage(
+              entry.timestamp,
+              entry.payload.call_id,
+              entry.payload.output || '',
+            ));
+          }
+
+          // web_search_call events are self-contained display items — no separate result
+          // event and no call_id in the payload. We push directly instead of upsertToolUse
+          // because there is no toolCallId to match against a future tool_result.
+          if (entry.type === 'response_item' && entry.payload?.type === 'web_search_call') {
+            const normalized = normalizeWebSearchCall(entry.payload);
             messages.push({
-              type: 'tool_result',
+              type: 'tool_use',
               timestamp: entry.timestamp,
-              toolCallId: entry.payload.call_id,
-              output: entry.payload.output || ''
+              toolName: normalized.toolName,
+              toolInput: normalized.toolInput,
             });
+          }
+
+          if (entry.type === 'event_msg' && entry.payload?.type === 'exec_command_end' && entry.payload?.call_id) {
+            const toolUseIndex = toolUseIndexByCallId.get(entry.payload.call_id);
+            const existingToolUse = toolUseIndex !== undefined ? messages[toolUseIndex] : null;
+            let fallbackInput = null;
+            if (existingToolUse?.toolInput) {
+              try {
+                fallbackInput = JSON.parse(existingToolUse.toolInput);
+              } catch {
+                fallbackInput = null;
+              }
+            }
+            const normalized = normalizeExecCommandEvent(entry.payload, fallbackInput);
+
+            upsertToolUse(buildToolUseMessage(
+              entry.timestamp,
+              normalized.toolName,
+              normalized.toolInput,
+              entry.payload.call_id,
+            ));
+            upsertToolResult(buildToolResultMessage(
+              entry.timestamp,
+              entry.payload.call_id,
+              normalized.toolResult?.content || '',
+              {
+                isError: normalized.toolResult?.isError === true,
+                toolUseResult: normalized.toolResult?.toolUseResult || null,
+              },
+            ));
+          }
+
+          if (entry.type === 'event_msg' && entry.payload?.type === 'patch_apply_end' && entry.payload?.call_id) {
+            const normalized = normalizePatchApplyEvent(entry.payload);
+            upsertToolResult(buildToolResultMessage(
+              entry.timestamp,
+              entry.payload.call_id,
+              normalized.toolResult.content,
+              {
+                isError: normalized.toolResult.isError === true,
+                toolUseResult: normalized.toolResult.toolUseResult,
+              },
+            ));
+
+            if (normalized.fileChangesToolInput) {
+              messages.push({
+                type: 'tool_use',
+                timestamp: entry.timestamp,
+                toolName: 'FileChanges',
+                toolInput: normalized.fileChangesToolInput,
+                toolCallId: `${entry.payload.call_id}:files`,
+              });
+              messages.push({
+                type: 'tool_result',
+                timestamp: entry.timestamp,
+                toolCallId: `${entry.payload.call_id}:files`,
+                output: entry.payload.status || 'completed',
+              });
+            }
           }
 
         } catch (parseError) {
@@ -3543,6 +4230,26 @@ async function renameSession(projectName, sessionId, newSummary, provider = 'cla
       console.error(`[Gemini] Failed to rename session ${sessionId}:`, e.message);
       throw new Error(`Failed to rename Gemini session: ${e.message}`);
     }
+  } else if (String(provider || '').toLowerCase() === 'nano') {
+    if (!safeNanoSessionFilename(sessionId)) {
+      throw new Error('Invalid Nano session id');
+    }
+    const nanoPath = await findNanoSessionStoragePath(projectName, sessionId);
+    if (!nanoPath) {
+      throw new Error(`Nano session ${sessionId} file not found`);
+    }
+    try {
+      const raw = await fs.readFile(nanoPath, 'utf-8');
+      const data = JSON.parse(raw);
+      data.title = trimmedSummary;
+      await fs.writeFile(nanoPath, JSON.stringify(data, null, 2), 'utf-8');
+      sessionDb.updateSessionName(sessionId, trimmedSummary);
+      console.log(`[Nano] Renamed session ${sessionId} to "${trimmedSummary}"`);
+      return true;
+    } catch (e) {
+      console.error(`[Nano] Failed to rename session ${sessionId}:`, e.message);
+      throw new Error(`Failed to rename Nano session: ${e.message}`);
+    }
   }
   // 2. Handle Cursor sessions (SQLite)
   else if (provider === 'cursor') {
@@ -3643,6 +4350,7 @@ export {
   getTrashedProjects,
   getSessions,
   getSessionMessages,
+  collectCodexProjectCandidates,
   parseJsonlSessions,
   renameProject,
   renameSession,
@@ -3663,6 +4371,8 @@ export {
   reconcileClaudeSessionIndex,
   reconcileCodexSessionIndex,
   reconcileGeminiSessionIndex,
+  reconcileOpenRouterSessionIndex,
+  reconcileLocalGPUSessionIndex,
   ensureProjectSkillLinks,
   getWorkspaceRootFromConfig,
   setWorkspaceRootInConfig

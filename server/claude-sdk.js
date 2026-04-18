@@ -25,6 +25,8 @@ import { applyStageTagsToSession, recordIndexedSession } from './utils/sessionIn
 import { buildTempAttachmentFilename } from './utils/imageAttachmentFiles.js';
 
 import { createRequestId, waitForToolApproval, resolveToolApproval as resolvePermApproval, matchesToolPermission } from './utils/permissions.js';
+import { buildMemoryBlock } from './utils/memoryPrompt.js';
+import { BTW_SYSTEM_PROMPT, buildBtwUserMessage } from './utils/btw.js';
 
 const activeSessions = new Map();
 const pendingClaudeSessionIndexReconciles = new Map();
@@ -143,10 +145,12 @@ function mapCliOptionsToSDK(options = {}) {
   sdkOptions.model = options.model || CLAUDE_MODELS.DEFAULT;
   console.log(`Using model: ${sdkOptions.model}`);
 
-  // Map system prompt configuration
+  // Map system prompt configuration with optional user memory injection
+  const memoryBlock = options.userId ? buildMemoryBlock(options.userId) : '';
   sdkOptions.systemPrompt = {
     type: 'preset',
-    preset: 'claude_code'  // Required to use CLAUDE.md
+    preset: 'claude_code',  // Required to use CLAUDE.md
+    ...(memoryBlock ? { append: memoryBlock } : {}),
   };
 
   // Map setting sources for CLAUDE.md loading
@@ -220,28 +224,78 @@ function transformMessage(sdkMessage) {
 }
 
 /**
- * Extracts token budget from the last assistant message's usage data.
- * This gives us per-API-call input tokens, which represents the actual
- * context window fill level (not cumulative across the agentic turn).
- * @param {Object|null} usage - usage object from assistant message (message.usage)
- * @returns {Object|null} Token budget object or null
+ * Returns the context window size for a given model name.
+ * Supports both SDK format ('sonnet', 'opus') and API format ('claude-opus-4-6').
+ * Falls back to CONTEXT_WINDOW env var, then 200000.
+ * @param {string|null} modelName
+ * @returns {number}
  */
-function extractTokenBudgetFromUsage(usage) {
+function getContextWindowForModel(modelName) {
+  const MODEL_CONTEXT_WINDOWS = {
+    // SDK format names
+    'sonnet':              200000,
+    'opus':                200000,
+    'haiku':               200000,
+    'opusplan':            200000,
+    'sonnet[1m]':          1000000,
+    // API format names
+    'claude-opus-4-6':             200000,
+    'claude-opus-4-20250918':      200000,
+    'claude-sonnet-4-6':           200000,
+    'claude-sonnet-4-20250514':    200000,
+    'claude-haiku-4-5':            200000,
+    'claude-haiku-4-5-20251001':   200000,
+    'claude-3-5-sonnet':           200000,
+    'claude-3-5-sonnet-20241022':  200000,
+    'claude-3-5-haiku':            200000,
+    'claude-3-5-haiku-20241022':   200000,
+    'claude-3-opus':               200000,
+    'claude-3-opus-20240229':      200000,
+    'claude-3-sonnet':             200000,
+    'claude-3-haiku':              200000,
+  };
+
+  if (modelName) {
+    // Exact match first
+    const exact = MODEL_CONTEXT_WINDOWS[modelName];
+    if (exact) return exact;
+    // Prefix match (e.g. 'claude-opus-4-6-20260301' matches 'claude-opus-4-6')
+    const prefix = Object.keys(MODEL_CONTEXT_WINDOWS).find(k => modelName.startsWith(k));
+    if (prefix) return MODEL_CONTEXT_WINDOWS[prefix];
+  }
+
+  // Fallback: env var override, then default
+  const envVal = parseInt(process.env.CONTEXT_WINDOW, 10);
+  return Number.isFinite(envVal) ? envVal : 200000;
+}
+
+/**
+ * Extracts token budget from the latest assistant message's usage data.
+ * Returns a snapshot of context window usage for a single API call,
+ * including both input tokens (with cache) and output tokens.
+ * Not cumulative across agentic turns.
+ * @param {Object|null} usage - usage object from assistant message (message.usage)
+ * @param {string|null} modelName - model name for context window lookup
+ * @returns {Object|null} Token budget object { used, total } or null
+ */
+function extractTokenBudgetFromUsage(usage, modelName) {
   if (!usage) {
     return null;
   }
 
   // In Claude API: input_tokens is the non-cached portion.
-  // Total context = input_tokens + cache_read_input_tokens + cache_creation_input_tokens
+  // Total context = input_tokens + cache_read_input_tokens + cache_creation_input_tokens + output_tokens
+  // This is a per-call snapshot — output_tokens here are for THIS response only,
+  // not double-counted with future turns' input_tokens.
   const inputTokens = usage.input_tokens || 0;
   const cacheReadTokens = usage.cache_read_input_tokens || 0;
   const cacheCreationTokens = usage.cache_creation_input_tokens || 0;
-  const totalUsed = inputTokens + cacheReadTokens + cacheCreationTokens;
+  const outputTokens = usage.output_tokens || 0;
+  const totalUsed = inputTokens + cacheReadTokens + cacheCreationTokens + outputTokens;
 
-  // Context window is the model's input limit
-  const contextWindow = parseInt(process.env.CONTEXT_WINDOW) || 200000;
+  const contextWindow = getContextWindowForModel(modelName);
 
-  console.log(`Token calculation: input=${inputTokens}, cacheRead=${cacheReadTokens}, cacheCreation=${cacheCreationTokens}, total=${totalUsed}/${contextWindow}`);
+  console.log(`Token calculation: model=${modelName}, input=${inputTokens}, cacheRead=${cacheReadTokens}, cacheCreation=${cacheCreationTokens}, output=${outputTokens}, total=${totalUsed}/${contextWindow}`);
 
   return {
     used: totalUsed,
@@ -469,6 +523,37 @@ async function queryClaudeSDK(command, options = {}, ws) {
       sdkOptions.mcpServers = mcpServers;
     }
 
+    // Inject compute-tools MCP server if an active compute node is configured
+    try {
+      const { getActiveNode } = await import('./compute-node.js');
+      const activeNode = await getActiveNode();
+      if (activeNode) {
+        const computeMcpPath = new URL('./mcp-compute.js', import.meta.url).pathname;
+        sdkOptions.mcpServers = {
+          ...(sdkOptions.mcpServers || {}),
+          'compute-tools': {
+            command: 'node',
+            args: [computeMcpPath],
+          },
+        };
+        // Append compute node context to system prompt
+        sdkOptions.appendSystemPrompt = [
+          sdkOptions.appendSystemPrompt || '',
+          '\n\n# Active Compute Node',
+          `A remote compute node "${activeNode.name}" (${activeNode.user}@${activeNode.host}) is configured and available.`,
+          `Type: ${activeNode.type === 'slurm' ? 'Slurm HPC cluster' : 'Direct GPU server'}.`,
+          `Work directory: ${activeNode.workDir || '~'}.`,
+          'When the user asks to run training, GPU tasks, or heavy computation, use the compute_* tools (compute_run, compute_sync, compute_slurm_submit, etc.) instead of local Bash.',
+          'Use compute_sync direction="up" to upload project code before running, and compute_run to execute commands remotely.',
+          'Use compute_info first if you need to check what GPU resources are available.',
+        ].join('\n');
+        console.log(`[claude-sdk] Compute MCP server injected for node "${activeNode.name}" (${activeNode.host})`);
+      }
+    } catch (err) {
+      // Compute node not configured or error loading — skip silently
+      console.log('[claude-sdk] No active compute node:', err.message);
+    }
+
     // Handle images - save to temp files and modify prompt
     const imageResult = await handleImages(command, options.images, options.cwd);
     const finalCommand = imageResult.modifiedCommand;
@@ -645,7 +730,7 @@ async function queryClaudeSDK(command, options = {}, ws) {
 
       // Send token budget update when the turn completes
       if (message.type === 'result') {
-        const tokenBudget = extractTokenBudgetFromUsage(lastAssistantUsage);
+        const tokenBudget = extractTokenBudgetFromUsage(lastAssistantUsage, options.model);
         if (tokenBudget) {
           console.log('Token budget from last assistant usage:', tokenBudget);
           ws.send({
@@ -739,21 +824,23 @@ async function abortClaudeSDKSession(sessionId) {
   try {
     console.log(`Aborting SDK session: ${sessionId}`);
 
-    // Call interrupt() on the query instance
-    await session.instance.interrupt();
+    // interrupt() can hang if the subprocess is unresponsive; race against a timeout
+    await Promise.race([
+      session.instance.interrupt(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('interrupt timed out after 5s')), 5000))
+    ]);
 
-    // Update session status
     session.status = 'aborted';
-
-    // Clean up temporary image files
     await cleanupTempFiles(session.tempImagePaths, session.tempDir);
-
-    // Clean up session
     removeSession(sessionId);
 
     return true;
   } catch (error) {
     console.error(`Error aborting session ${sessionId}:`, error);
+    // Still clean up the session even if interrupt failed/timed out
+    session.status = 'aborted';
+    removeSession(sessionId);
+    cleanupTempFiles(session.tempImagePaths, session.tempDir).catch(() => {});
     return false;
   }
 }
@@ -786,6 +873,70 @@ function getActiveClaudeSDKSessions() {
   return getAllSessions();
 }
 
+/**
+ * One-shot, tool-free side question (Claude Code /btw-style). Does not resume the main SDK session.
+ */
+async function runClaudeBtw({ question, transcript, cwd, model, signal }) {
+  const userBlock = buildBtwUserMessage(question, transcript);
+
+  const sdkOptions = {
+    cwd: cwd || process.cwd(),
+    model: model || CLAUDE_MODELS.DEFAULT,
+    tools: [],
+    allowedTools: [],
+    settingSources: [],
+    systemPrompt: BTW_SYSTEM_PROMPT,
+    permissionMode: 'default',
+  };
+
+  const prevStreamTimeout = process.env.CLAUDE_CODE_STREAM_CLOSE_TIMEOUT;
+  process.env.CLAUDE_CODE_STREAM_CLOSE_TIMEOUT = '120000';
+
+  let answer = '';
+  let lastError = null;
+
+  try {
+    const queryInstance = query({
+      prompt: userBlock,
+      options: sdkOptions,
+    });
+
+    for await (const message of queryInstance) {
+      if (signal?.aborted) {
+        break;
+      }
+      if (message.type === 'result') {
+        if (message.subtype === 'success') {
+          answer = message.result || answer;
+        } else {
+          lastError = Array.isArray(message.errors) ? message.errors.join('\n') : 'Side question failed';
+        }
+      }
+    }
+  } catch (err) {
+    if (signal?.aborted) {
+      return { answer: '' };
+    }
+    throw new Error(err?.message || String(err));
+  } finally {
+    if (prevStreamTimeout !== undefined) {
+      process.env.CLAUDE_CODE_STREAM_CLOSE_TIMEOUT = prevStreamTimeout;
+    } else {
+      delete process.env.CLAUDE_CODE_STREAM_CLOSE_TIMEOUT;
+    }
+  }
+
+  if (signal?.aborted) {
+    return { answer: '' };
+  }
+
+  if (lastError) {
+    throw new Error(lastError);
+  }
+
+  return { answer: answer || '' };
+}
+
 // Export public API
 export {
   queryClaudeSDK,
@@ -793,5 +944,7 @@ export {
   isClaudeSDKSessionActive,
   getClaudeSDKSessionStartTime,
   getActiveClaudeSDKSessions,
-  resolveToolApproval
+  resolveToolApproval,
+  getContextWindowForModel,
+  runClaudeBtw,
 };

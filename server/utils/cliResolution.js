@@ -1,10 +1,15 @@
 import { spawn, spawnSync } from 'child_process';
 
+function isCommandNotFoundExitCode(code) {
+    return code === 127 || code === 9009;
+}
+
 /**
  * Build ordered CLI command candidates from env override + defaults.
  *
  * @param {Object} options
  * @param {string} options.envVarName Environment variable name containing an override command.
+ * @param {string[]} [options.legacyEnvVarNames=[]] Older env var names checked after envVarName (migration).
  * @param {string[]} options.defaultCommands Fallback command names in preference order.
  * @param {string} [options.platform=process.platform] Runtime platform, used for Windows suffix handling.
  * @param {boolean} [options.appendWindowsSuffixes=false] Whether to append .cmd/.exe candidates on Windows.
@@ -12,11 +17,19 @@ import { spawn, spawnSync } from 'child_process';
  */
 function getCliCommandCandidates({
     envVarName,
+    legacyEnvVarNames = [],
     defaultCommands,
     platform = process.platform,
     appendWindowsSuffixes = false
 }) {
-    const envCommand = String(process.env[envVarName] || '').trim();
+    let envCommand = '';
+    for (const key of [envVarName, ...legacyEnvVarNames].filter(Boolean)) {
+        const s = String(process.env[key] || '').trim();
+        if (s) {
+            envCommand = s;
+            break;
+        }
+    }
     const rawCandidates = [];
 
     if (envCommand) {
@@ -57,7 +70,7 @@ function isCommandAvailable(command, args = ['--help'], platform = process.platf
         shell: platform === 'win32'
     });
 
-    return !result.error;
+    return !result.error && !isCommandNotFoundExitCode(result.status);
 }
 
 /**
@@ -109,13 +122,15 @@ function checkCommandAvailable(command, args = ['--help'], { platform = process.
         });
 
         childProcess.on('spawn', () => {
-            clearTimeout(timeout);
-            finish(true);
+            if (platform !== 'win32') {
+                clearTimeout(timeout);
+                finish(true);
+            }
         });
 
         childProcess.on('close', (code) => {
             clearTimeout(timeout);
-            finish(code !== 127);
+            finish(!isCommandNotFoundExitCode(code));
         });
     });
 }
@@ -125,6 +140,7 @@ function checkCommandAvailable(command, args = ['--help'], { platform = process.
  *
  * @param {Object} options
  * @param {string} options.envVarName Environment variable with command override.
+ * @param {string[]} [options.legacyEnvVarNames=[]] Older env vars (after envVarName) for migration.
  * @param {string[]} options.defaultCommands Fallback command names in preference order.
  * @param {string[]} [options.args=['--help']] Probe arguments.
  * @param {string} [options.platform=process.platform] Runtime platform.
@@ -134,6 +150,7 @@ function checkCommandAvailable(command, args = ['--help'], { platform = process.
  */
 async function resolveAvailableCliCommand({
     envVarName,
+    legacyEnvVarNames = [],
     defaultCommands,
     args = ['--help'],
     platform = process.platform,
@@ -142,6 +159,7 @@ async function resolveAvailableCliCommand({
 }) {
     const candidates = getCliCommandCandidates({
         envVarName,
+        legacyEnvVarNames,
         defaultCommands,
         platform,
         appendWindowsSuffixes

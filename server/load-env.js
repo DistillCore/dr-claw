@@ -42,6 +42,18 @@ function resolveDefaultDatabasePath() {
   }
 }
 
+function stripOptionalEnvQuotes(raw) {
+  const v = String(raw).trim();
+  if (v.length >= 2) {
+    const open = v[0];
+    const close = v[v.length - 1];
+    if ((open === '"' && close === '"') || (open === "'" && close === "'")) {
+      return v.slice(1, -1);
+    }
+  }
+  return v;
+}
+
 try {
   const envPath = path.join(__dirname, '../.env');
   const envFile = fs.readFileSync(envPath, 'utf8');
@@ -50,7 +62,7 @@ try {
     if (trimmedLine && !trimmedLine.startsWith('#')) {
       const [key, ...valueParts] = trimmedLine.split('=');
       if (key && valueParts.length > 0 && !process.env[key]) {
-        process.env[key] = valueParts.join('=').trim();
+        process.env[key] = stripOptionalEnvQuotes(valueParts.join('='));
       }
     }
   });
@@ -60,4 +72,12 @@ try {
 
 if (!process.env.DATABASE_PATH) {
   process.env.DATABASE_PATH = resolveDefaultDatabasePath();
+}
+
+// Migrate legacy ANTHROPIC_AUTH_TOKEN → ANTHROPIC_API_KEY.
+// ANTHROPIC_AUTH_TOKEN was incorrectly used to store API keys; the Claude Code
+// SDK expects ANTHROPIC_API_KEY (sent as x-api-key) for direct API key auth.
+if (process.env.ANTHROPIC_AUTH_TOKEN && !process.env.ANTHROPIC_API_KEY) {
+  process.env.ANTHROPIC_API_KEY = process.env.ANTHROPIC_AUTH_TOKEN;
+  delete process.env.ANTHROPIC_AUTH_TOKEN;
 }

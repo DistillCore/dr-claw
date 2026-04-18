@@ -16,14 +16,33 @@
 import { Codex } from '@openai/codex-sdk';
 import { promises as fs } from 'fs';
 import path from 'path';
+import os from 'os';
 import { encodeProjectPath, reconcileCodexSessionIndex } from './projects.js';
 import { sessionDb } from './database/db.js';
 import { applyStageTagsToSession, recordIndexedSession } from './utils/sessionIndex.js';
 import { classifyError, classifySDKError } from '../shared/errorClassifier.js';
 import { buildTempAttachmentFilename } from './utils/imageAttachmentFiles.js';
+import { buildCodexRealtimeTokenBudget } from './utils/sessionTokenUsage.js';
+import { expandSkillCommand } from './utils/skillExpander.js';
+import { CODEX_MODELS } from '../shared/modelConstants.js';
+import { BTW_SYSTEM_PROMPT, buildBtwUserMessage } from './utils/btw.js';
 
 // Track active sessions
 const activeCodexSessions = new Map();
+
+function moveActiveCodexSession(oldSessionId, newSessionId) {
+  if (!oldSessionId || !newSessionId || oldSessionId === newSessionId) {
+    return;
+  }
+
+  const session = activeCodexSessions.get(oldSessionId);
+  if (!session) {
+    return;
+  }
+
+  activeCodexSessions.set(newSessionId, session);
+  activeCodexSessions.delete(oldSessionId);
+}
 
 /**
  * Check if an agent_message item contains system prompt / instruction content
@@ -328,7 +347,7 @@ async function cleanupCodexTempFiles(tempImagePaths, tempDir) {
 /**
  * Execute a Codex query with streaming
  * @param {string} command - The prompt to send
- * @param {object} options - Options including cwd, sessionId, model, permissionMode
+ * @param {object} options - Options including cwd, sessionId, model, permissionMode, modelReasoningEffort
  * @param {WebSocket|object} ws - WebSocket connection or response writer
  */
 export async function queryCodex(command, options = {}, ws) {
@@ -341,6 +360,7 @@ export async function queryCodex(command, options = {}, ws) {
     attachments,
     images,
     permissionMode = 'default',
+    modelReasoningEffort,
     sessionMode,
     stageTagKeys,
     stageTagSource = 'task_context',
@@ -351,7 +371,8 @@ export async function queryCodex(command, options = {}, ws) {
 
   let codex;
   let thread;
-  let currentSessionId = sessionId;
+  let currentSessionId = sessionId || null;
+  let provisionalSessionId = null;
   const abortController = new AbortController();
   let tempImagePaths = [];
   let tempDir = null;
@@ -376,7 +397,8 @@ export async function queryCodex(command, options = {}, ws) {
       skipGitRepoCheck: true,
       sandboxMode,
       approvalPolicy,
-      model
+      model,
+      modelReasoningEffort,
     };
 
     // Start or resume thread
@@ -386,11 +408,8 @@ export async function queryCodex(command, options = {}, ws) {
       thread = codex.startThread(threadOptions);
     }
 
-    // Get the thread ID
-    currentSessionId = thread.id || sessionId || `codex-${Date.now()}`;
-
-    // Track the session
-    activeCodexSessions.set(currentSessionId, {
+    provisionalSessionId = currentSessionId || `codex-${Date.now()}`;
+    activeCodexSessions.set(provisionalSessionId, {
       thread,
       codex,
       status: 'running',
@@ -398,32 +417,50 @@ export async function queryCodex(command, options = {}, ws) {
       startTime: Date.now()
     });
 
-    // Send session created event
-    if (workingDirectory) {
-      recordIndexedSession({
+    const publishSessionId = (resolvedSessionId) => {
+      if (!resolvedSessionId || resolvedSessionId === currentSessionId) {
+        return;
+      }
+
+      const previousSessionId = currentSessionId || provisionalSessionId;
+      currentSessionId = resolvedSessionId;
+
+      if (previousSessionId && previousSessionId !== currentSessionId) {
+        moveActiveCodexSession(previousSessionId, currentSessionId);
+      }
+
+      if (workingDirectory) {
+        recordIndexedSession({
+          sessionId: currentSessionId,
+          provider: 'codex',
+          projectPath: workingDirectory,
+          sessionMode: sessionMode || 'research',
+          stageTagKeys,
+          tagSource: stageTagSource,
+        });
+      }
+
+      sendMessage(ws, {
+        type: 'session-created',
         sessionId: currentSessionId,
         provider: 'codex',
-        projectPath: workingDirectory,
-        sessionMode: sessionMode || 'research',
-        stageTagKeys,
-        tagSource: stageTagSource,
+        mode: sessionMode || 'research'
       });
-    }
-    sendMessage(ws, {
-      type: 'session-created',
-      sessionId: currentSessionId,
-      provider: 'codex',
-      mode: sessionMode || 'research'
-    });
+    };
 
-    const preparedInput = await prepareCodexInput(command, images, workingDirectory);
+    publishSessionId(thread.id || sessionId || null);
+
+    // Expand /skill-name slash commands into full SKILL.md instructions
+    const expandedCommand = await expandSkillCommand(command?.trim() || command, workingDirectory);
+
+    const preparedInput = await prepareCodexInput(expandedCommand, images, workingDirectory);
     tempImagePaths = preparedInput.tempImagePaths;
     tempDir = preparedInput.tempDir;
 
     // Execute with streaming
     // Prefer pre-uploaded attachments (buildCodexInput) over base64 temp images (prepareCodexInput)
     const codexInput = attachments
-      ? buildCodexInput(command, attachments)
+      ? buildCodexInput(expandedCommand, attachments)
       : preparedInput.input;
     const streamedTurn = await thread.runStreamed(codexInput, {
       signal: abortController.signal
@@ -433,8 +470,13 @@ export async function queryCodex(command, options = {}, ws) {
     const sentItems = new Map(); // itemId -> lifecycle stage
 
     for await (const event of streamedTurn.events) {
+      if (event.type === 'thread.started' && event.id) {
+        publishSessionId(event.id);
+      }
+
       // Check if session was aborted
-      const session = activeCodexSessions.get(currentSessionId);
+      const activeLookupId = currentSessionId || provisionalSessionId;
+      const session = activeCodexSessions.get(activeLookupId);
       if (!session || session.status === 'aborted') {
         break;
       }
@@ -492,7 +534,8 @@ export async function queryCodex(command, options = {}, ws) {
       }
 
       // Add startTime for frontend timer synchronization
-      const activeSession = currentSessionId ? activeCodexSessions.get(currentSessionId) : null;
+      const activeSessionId = currentSessionId || provisionalSessionId;
+      const activeSession = activeSessionId ? activeCodexSessions.get(activeSessionId) : null;
       if (Number.isFinite(activeSession?.startTime)) {
         transformed.startTime = activeSession.startTime;
       }
@@ -523,19 +566,15 @@ export async function queryCodex(command, options = {}, ws) {
 
       // Extract and send token usage if available (normalized to match Claude format)
       if (event.type === 'turn.completed' && event.usage) {
-        const totalTokens = (event.usage.input_tokens || 0) + (event.usage.output_tokens || 0);
         sendMessage(ws, {
           type: 'token-budget',
-          data: {
-            used: totalTokens,
-            total: 200000 // Default context window for Codex models
-          },
+          data: buildCodexRealtimeTokenBudget(event.usage),
           sessionId: currentSessionId
         });
       }
     }
 
-    const actualSessionId = thread.id || currentSessionId;
+    const actualSessionId = thread.id || currentSessionId || provisionalSessionId;
 
     // Send completion event immediately so the UI can settle
     sendMessage(ws, {
@@ -561,7 +600,8 @@ export async function queryCodex(command, options = {}, ws) {
     }
 
   } catch (error) {
-    const session = currentSessionId ? activeCodexSessions.get(currentSessionId) : null;
+    const lookupSessionId = currentSessionId || provisionalSessionId;
+    const session = lookupSessionId ? activeCodexSessions.get(lookupSessionId) : null;
     const wasAborted =
       session?.status === 'aborted' ||
       error?.name === 'AbortError' ||
@@ -584,8 +624,9 @@ export async function queryCodex(command, options = {}, ws) {
     await cleanupCodexTempFiles(tempImagePaths, tempDir);
 
     // Update session status
-    if (currentSessionId) {
-      const session = activeCodexSessions.get(currentSessionId);
+    const finalSessionId = currentSessionId || provisionalSessionId;
+    if (finalSessionId) {
+      const session = activeCodexSessions.get(finalSessionId);
       if (session) {
         session.status = session.status === 'aborted' ? 'aborted' : 'completed';
       }
@@ -672,6 +713,62 @@ function sendMessage(ws, data) {
   } catch (error) {
     console.error('[Codex] Error sending message:', error);
   }
+}
+
+/**
+ * Resolve an OpenAI API key from environment or ~/.codex/auth.json.
+ */
+async function resolveOpenAIApiKey(env) {
+  if (env?.OPENAI_API_KEY) return env.OPENAI_API_KEY;
+  if (process.env.OPENAI_API_KEY) return process.env.OPENAI_API_KEY;
+  try {
+    const authPath = path.join(os.homedir(), '.codex', 'auth.json');
+    const content = await fs.readFile(authPath, 'utf8');
+    const auth = JSON.parse(content);
+    if (auth?.OPENAI_API_KEY) return auth.OPENAI_API_KEY;
+  } catch {
+    // auth.json missing or unreadable
+  }
+  return null;
+}
+
+/**
+ * One-shot, tool-free side question for the /btw overlay.
+ * Bypasses the Codex SDK and calls the OpenAI Chat Completions API directly.
+ */
+export async function runCodexBtw({ question, transcript, model, env, signal }) {
+  const apiKey = await resolveOpenAIApiKey(env);
+  if (!apiKey) {
+    throw new Error('No OpenAI API key available for Codex /btw');
+  }
+
+  const userBlock = buildBtwUserMessage(question, transcript);
+  const effectiveModel = model || CODEX_MODELS.DEFAULT;
+
+  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: effectiveModel,
+      messages: [
+        { role: 'system', content: BTW_SYSTEM_PROMPT },
+        { role: 'user', content: userBlock },
+      ],
+    }),
+    signal,
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.text().catch(() => '');
+    throw new Error(`OpenAI API error (${response.status}): ${errorBody.slice(0, 500)}`);
+  }
+
+  const data = await response.json();
+  const answer = data?.choices?.[0]?.message?.content || '';
+  return { answer };
 }
 
 // Clean up old completed sessions periodically

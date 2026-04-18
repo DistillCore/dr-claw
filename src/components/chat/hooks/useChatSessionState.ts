@@ -2,10 +2,12 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { MutableRefObject } from 'react';
 
 import { api, authenticatedFetch } from '../../../utils/api';
+import { isTemporarySessionId } from '../../../constants/session';
 import { RESUMING_STATUS_TEXT } from '../types/types';
-import type { ChatMessage, Provider } from '../types/types';
+import type { ChatMessage, Provider, TokenBudget } from '../types/types';
 import type { Project, ProjectSession } from '../../../types/app';
 import { clearSessionTimerStart, readSessionTimerStart, safeLocalStorage } from '../utils/chatStorage';
+import { hydrateStoredChatMessages } from '../utils/chatMessages';
 import {
   convertCursorSessionMessages,
   convertSessionMessages,
@@ -15,8 +17,54 @@ import {
 
 const MESSAGES_PER_PAGE = 20;
 const INITIAL_VISIBLE_MESSAGES = 100;
+
+// LRU message cache for instant tab switching. Max 10 sessions cached.
+const SESSION_MESSAGE_CACHE_MAX = 10;
+type CachedSessionData = { messages: ChatMessage[]; tokenUsage?: TokenBudget | null; total: number; hasMore: boolean };
+const sessionMessageCache = new Map<string, CachedSessionData>();
+function cacheSessionMessages(key: string, data: CachedSessionData) {
+  if (sessionMessageCache.size >= SESSION_MESSAGE_CACHE_MAX) {
+    const oldest = sessionMessageCache.keys().next().value;
+    if (oldest) sessionMessageCache.delete(oldest);
+  }
+  sessionMessageCache.set(key, data);
+}
+function getCachedSessionMessages(key: string) {
+  const data = sessionMessageCache.get(key);
+  if (!data) return null;
+  sessionMessageCache.delete(key);
+  sessionMessageCache.set(key, data);
+  return data;
+}
+export function invalidateSessionMessageCache(projectName: string, sessionId: string) {
+  sessionMessageCache.delete(`${projectName}:${sessionId}`);
+}
+
 /** Grace period for WebSocket status-check response before clearing stale resume state */
 const STATUS_VALIDATION_TIMEOUT_MS = 5000;
+
+/**
+ * Prefer session.__provider; else infer from project session lists.
+ * Never fall back to chat composer `selected-provider` — if that is "nano", every unmatched session
+ * would request provider=nano and load empty history.
+ */
+function resolveSessionProviderForLoad(session: ProjectSession | null, project: Project | null): Provider | string {
+  if (session?.__provider) {
+    return session.__provider;
+  }
+  if (!session?.id || !project) {
+    return 'claude';
+  }
+  const { id } = session;
+  if (project.nanoSessions?.some((s) => s.id === id)) return 'nano';
+  if (project.localSessions?.some((s) => s.id === id)) return 'local';
+  if (project.openrouterSessions?.some((s) => s.id === id)) return 'openrouter';
+  if (project.geminiSessions?.some((s) => s.id === id)) return 'gemini';
+  if (project.codexSessions?.some((s) => s.id === id)) return 'codex';
+  if (project.cursorSessions?.some((s) => s.id === id)) return 'cursor';
+  if (project.sessions?.some((s) => s.id === id)) return 'claude';
+  return 'claude';
+}
 
 type PendingViewSession = {
   sessionId: string | null;
@@ -58,7 +106,7 @@ export function useChatSessionState({
       const saved = safeLocalStorage.getItem(`chat_messages_${selectedProject.name}`);
       if (saved) {
         try {
-          return JSON.parse(saved) as ChatMessage[];
+          return hydrateStoredChatMessages(JSON.parse(saved) as ChatMessage[]);
         } catch {
           console.error('Failed to parse saved chat messages, resetting');
           safeLocalStorage.removeItem(`chat_messages_${selectedProject.name}`);
@@ -73,15 +121,7 @@ export function useChatSessionState({
   const setChatMessages = useCallback((updater: React.SetStateAction<ChatMessage[]>) => {
     _setChatMessages((prev) => {
       const next = typeof updater === 'function' ? updater(prev) : updater;
-      let hasChanges = false;
-      const final = next.map((msg) => {
-        if (!msg.id && !msg.messageId && !msg.toolId && !msg.toolCallId && !msg.blobId && !msg.rowid && !msg.sequence) {
-          hasChanges = true;
-          return { ...msg, messageId: (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : Math.random().toString(36).substring(2, 15) };
-        }
-        return msg;
-      });
-      return hasChanges ? final : next;
+      return hydrateStoredChatMessages(next);
     });
   }, []);
 
@@ -95,7 +135,7 @@ export function useChatSessionState({
     return false;
   });
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(selectedSession?.id || null);
-  const [sessionMessages, setSessionMessages] = useState<any[]>([]);
+  const [sessionMessages, setSessionMessages] = useState<ChatMessage[]>([]);
   const [isLoadingSessionMessages, setIsLoadingSessionMessages] = useState(false);
   const [isLoadingMoreMessages, setIsLoadingMoreMessages] = useState(false);
   const [hasMoreMessages, setHasMoreMessages] = useState(false);
@@ -103,7 +143,7 @@ export function useChatSessionState({
   const [isSystemSessionChange, setIsSystemSessionChange] = useState(false);
   const [canAbortSession, setCanAbortSession] = useState(false);
   const [isUserScrolledUp, setIsUserScrolledUp] = useState(false);
-  const [tokenBudget, setTokenBudget] = useState<Record<string, unknown> | null>(null);
+  const [tokenBudget, setTokenBudget] = useState<TokenBudget | null>(null);
   const [visibleMessageCount, setVisibleMessageCount] = useState(INITIAL_VISIBLE_MESSAGES);
   const [claudeStatus, setClaudeStatus] = useState<{ text: string; tokens: number; can_interrupt: boolean; startTime?: number } | null>(() => {
     if (!persistedInitialStartTime) {
@@ -117,6 +157,7 @@ export function useChatSessionState({
       startTime: persistedInitialStartTime,
     };
   });
+  const [statusTextOverride, setStatusTextOverride] = useState<string | null>(null);
   const [allMessagesLoaded, setAllMessagesLoaded] = useState(false);
   const [isLoadingAllMessages, setIsLoadingAllMessages] = useState(false);
   const [loadAllJustFinished, setLoadAllJustFinished] = useState(false);
@@ -161,11 +202,21 @@ export function useChatSessionState({
   const loadSessionMessages = useCallback(
     async (projectName: string, sessionId: string, loadMore = false, provider: Provider | string = 'claude') => {
       if (!projectName || !sessionId) {
-        return [] as any[];
+        return [] as ChatMessage[];
       }
 
       const isInitialLoad = !loadMore;
+      const cacheKey = `${projectName}:${sessionId}`;
       if (isInitialLoad) {
+        const cached = getCachedSessionMessages(cacheKey);
+        if (cached) {
+          if (cached.tokenUsage) setTokenBudget(cached.tokenUsage);
+          setHasMoreMessages(cached.hasMore);
+          setTotalMessages(cached.total);
+          messagesOffsetRef.current = cached.messages.length;
+          setIsLoadingSessionMessages(false);
+          return cached.messages;
+        }
         setIsLoadingSessionMessages(true);
       } else {
         setIsLoadingMoreMessages(true);
@@ -195,6 +246,9 @@ export function useChatSessionState({
           setHasMoreMessages(Boolean(data.hasMore));
           setTotalMessages(Number(data.total || 0));
           messagesOffsetRef.current = currentOffset + loadedCount;
+          if (isInitialLoad) {
+            cacheSessionMessages(cacheKey, { messages: data.messages || [], tokenUsage: data.tokenUsage, total: Number(data.total || 0), hasMore: Boolean(data.hasMore) });
+          }
           return data.messages || [];
         }
 
@@ -202,6 +256,9 @@ export function useChatSessionState({
         setHasMoreMessages(false);
         setTotalMessages(messages.length);
         messagesOffsetRef.current = messages.length;
+        if (isInitialLoad) {
+          cacheSessionMessages(cacheKey, { messages, tokenUsage: data.tokenUsage, total: messages.length, hasMore: false });
+        }
         return messages;
       } catch (error) {
         console.error('Error loading session messages:', error);
@@ -281,7 +338,7 @@ export function useChatSessionState({
         return false;
       }
 
-      const sessionProvider = selectedSession.__provider || 'claude';
+      const sessionProvider = resolveSessionProviderForLoad(selectedSession, selectedProject) as Provider | string;
       if (sessionProvider === 'cursor') {
         return false;
       }
@@ -387,7 +444,7 @@ export function useChatSessionState({
   useEffect(() => {
     const loadMessages = async () => {
       if (selectedSession && selectedProject) {
-        const currentProvider = selectedSession.__provider || (localStorage.getItem('selected-provider') as Provider) || 'claude';
+        const currentProvider = resolveSessionProviderForLoad(selectedSession, selectedProject) as Provider | string;
         isLoadingSessionRef.current = true;
 
         const sessionChanged = currentSessionId !== null && currentSessionId !== selectedSession.id;
@@ -507,7 +564,7 @@ export function useChatSessionState({
 
     const reloadExternalMessages = async () => {
       try {
-        const provider = (localStorage.getItem('selected-provider') as Provider) || 'claude';
+        const provider = resolveSessionProviderForLoad(selectedSession, selectedProject) as Provider;
 
         if (provider === 'cursor') {
           const projectPath = selectedProject.fullPath || selectedProject.path || '';
@@ -521,7 +578,7 @@ export function useChatSessionState({
           selectedProject.name,
           selectedSession.id,
           false,
-          selectedSession.__provider || 'claude',
+          provider,
         );
         setSessionMessages(messages);
 
@@ -565,23 +622,24 @@ export function useChatSessionState({
   }, [chatMessages, selectedProject]);
 
   useEffect(() => {
-    if (!selectedProject || !selectedSession?.id || selectedSession.id.startsWith('new-session-')) {
+    if (!selectedProject || !selectedSession?.id || isTemporarySessionId(selectedSession.id)) {
       setTokenBudget(null);
       return;
     }
 
-    const sessionProvider = selectedSession.__provider || 'claude';
-    if (sessionProvider !== 'claude') {
+    const sessionProvider = resolveSessionProviderForLoad(selectedSession, selectedProject) as Provider | string;
+    if (sessionProvider === 'cursor') {
+      setTokenBudget(null);
       return;
     }
 
     const fetchInitialTokenUsage = async () => {
       try {
-        const url = `/api/projects/${selectedProject.name}/sessions/${selectedSession.id}/token-usage`;
+        const url = `/api/projects/${selectedProject.name}/sessions/${selectedSession.id}/token-usage?provider=${encodeURIComponent(sessionProvider)}`;
         const response = await authenticatedFetch(url);
         if (response.ok) {
           const data = await response.json();
-          setTokenBudget(data);
+          setTokenBudget(data as TokenBudget);
         } else {
           setTokenBudget(null);
         }
@@ -591,7 +649,7 @@ export function useChatSessionState({
     };
 
     fetchInitialTokenUsage();
-  }, [selectedProject, selectedSession?.id, selectedSession?.__provider]);
+  }, [selectedProject, selectedSession]);
 
   const visibleMessages = useMemo(() => {
     if (chatMessages.length <= visibleMessageCount) {
@@ -738,7 +796,7 @@ export function useChatSessionState({
   const loadAllMessages = useCallback(async () => {
     if (!selectedSession || !selectedProject) return;
     if (isLoadingAllMessages) return;
-    const sessionProvider = selectedSession.__provider || 'claude';
+    const sessionProvider = resolveSessionProviderForLoad(selectedSession, selectedProject) as Provider | string;
     if (sessionProvider === 'cursor') {
       setVisibleMessageCount(Infinity);
       setAllMessagesLoaded(true);
@@ -848,6 +906,8 @@ export function useChatSessionState({
     showLoadAllOverlay,
     claudeStatus,
     setClaudeStatus,
+    statusTextOverride,
+    setStatusTextOverride,
     createDiff,
     scrollContainerRef,
     scrollToBottom,

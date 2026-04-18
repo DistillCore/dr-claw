@@ -8,6 +8,7 @@ import MobileNav from '../MobileNav';
 
 import { useWebSocket } from '../../contexts/WebSocketContext';
 import { useDeviceSettings } from '../../hooks/useDeviceSettings';
+import { useDesktop } from '../../hooks/useDesktop';
 import { useSessionProtection } from '../../hooks/useSessionProtection';
 import { useProjectsState } from '../../hooks/useProjectsState';
 import { useInteractionTelemetry } from '../../hooks/useInteractionTelemetry';
@@ -24,6 +25,7 @@ export default function AppContent() {
   const { sessionId } = useParams<{ sessionId?: string }>();
   const { t } = useTranslation('common');
   const { isMobile } = useDeviceSettings({ trackPWA: false });
+  const { isDesktop, on: onDesktopEvent } = useDesktop();
   const { ws, sendMessage, latestMessage, isConnected } = useWebSocket();
   const { preferences } = useUiPreferences();
   const { sidebarVisible } = preferences;
@@ -51,6 +53,8 @@ export default function AppContent() {
     externalMessageUpdate,
     importedProjectAnalysisPrompt,
     newSessionMode,
+    sessionNavigationSource,
+    resetSessionNavigationSource,
     setNewSessionMode,
     setActiveTab,
     setSidebarOpen,
@@ -62,6 +66,7 @@ export default function AppContent() {
     sidebarSharedProps,
     handleProjectSelect,
     handleNavigateToSession,
+    handleNewSession,
     handleStartWorkspaceQa,
     handleChatFromReference,
     pendingAutoIntake,
@@ -145,6 +150,30 @@ export default function AppContent() {
       window.removeEventListener(TELEMETRY_SETTINGS_EVENT, syncTelemetrySetting);
     };
   }, [isConnected, sendMessage]);
+
+  useEffect(() => {
+    if (!isDesktop || !onDesktopEvent) {
+      return;
+    }
+
+    const cleanup = onDesktopEvent('app:navigate', (payload: { action: string; path?: string }) => {
+      switch (payload.action) {
+        case 'openSettings':
+          setShowSettings(true);
+          break;
+        case 'newChat':
+          navigate('/');
+          break;
+        case 'openWorkspace':
+          if (payload.path) {
+            navigate('/');
+          }
+          break;
+      }
+    });
+
+    return cleanup;
+  }, [isDesktop, onDesktopEvent, navigate, setShowSettings]);
 
   const SIDEBAR_MIN = 220;
   const SIDEBAR_MAX = 480;
@@ -261,8 +290,8 @@ export default function AppContent() {
           onSessionNotProcessing={markSessionAsNotProcessing}
           processingSessions={processingSessions}
           onReplaceTemporarySession={replaceTemporarySession}
-          onNavigateToSession={(targetSessionId: string, targetProvider?, targetProjectName?) =>
-            handleNavigateToSession(targetSessionId, targetProvider, targetProjectName)}
+          onNavigateToSession={(targetSessionId: string, targetProvider?, targetProjectName?, options?) =>
+            handleNavigateToSession(targetSessionId, targetProvider, targetProjectName, options)}
           onShowSettings={() => setShowSettings(true)}
           externalMessageUpdate={externalMessageUpdate}
           pendingAutoIntake={pendingAutoIntake}
@@ -274,6 +303,9 @@ export default function AppContent() {
           onChatFromReference={handleChatFromReference}
           newSessionMode={newSessionMode}
           onNewSessionModeChange={setNewSessionMode}
+          sessionNavigationSource={sessionNavigationSource}
+          onResetNavigationSource={resetSessionNavigationSource}
+          onNewSession={handleNewSession}
         />
       </div>
 

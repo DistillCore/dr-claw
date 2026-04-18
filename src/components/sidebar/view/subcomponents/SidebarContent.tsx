@@ -20,9 +20,12 @@ type SidebarContentProps = {
   onOpenDashboard: () => void;
   onOpenTrash: () => void;
   onOpenSkills: () => void;
+  onOpenAutoResearch: () => void;
   onOpenNews: () => void;
+  onOpenCompute: () => void;
   onCreateProject: () => void;
   onCollapseSidebar: () => void;
+  currentVersion: string;
   updateAvailable: boolean;
   releaseInfo: ReleaseInfo | null;
   latestVersion: string | null;
@@ -47,9 +50,12 @@ export default function SidebarContent({
   onOpenDashboard,
   onOpenTrash,
   onOpenSkills,
+  onOpenAutoResearch,
   onOpenNews,
+  onOpenCompute,
   onCreateProject,
   onCollapseSidebar,
+  currentVersion,
   updateAvailable,
   releaseInfo,
   latestVersion,
@@ -78,7 +84,9 @@ export default function SidebarContent({
         onOpenDashboard={onOpenDashboard}
         onOpenTrash={onOpenTrash}
         onOpenSkills={onOpenSkills}
+        onOpenAutoResearch={onOpenAutoResearch}
         onOpenNews={onOpenNews}
+        onOpenCompute={onOpenCompute}
         onCreateProject={onCreateProject}
         onCollapseSidebar={onCollapseSidebar}
         t={t}
@@ -89,6 +97,7 @@ export default function SidebarContent({
       </ScrollArea>
 
       <SidebarFooter
+        currentVersion={currentVersion}
         updateAvailable={updateAvailable}
         releaseInfo={releaseInfo}
         latestVersion={latestVersion}

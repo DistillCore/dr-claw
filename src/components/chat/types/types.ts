@@ -4,6 +4,7 @@ import type {
   Project,
   ProjectSession,
   SessionMode,
+  SessionNavigationSource,
   SessionProvider,
 } from '../../../types/app';
 
@@ -52,7 +53,10 @@ export interface AttachedPrompt {
 
 export interface ChatMessage {
   type: string;
+  id?: string | number;
+  messageId?: string;
   content?: string;
+  submittedContent?: string;
   timestamp: string | number | Date;
   images?: ChatImage[];
   attachments?: ChatAttachment[];
@@ -73,6 +77,9 @@ export interface ChatMessage {
     currentToolIndex: number;
     isComplete: boolean;
   };
+  editedFromMessageId?: string;
+  isSuperseded?: boolean;
+  supersededByMessageId?: string;
   attachedPrompt?: AttachedPrompt;
   errorType?: 'usage_limit' | 'overloaded' | 'network' | 'auth' | 'unknown';
   isRetryable?: boolean;
@@ -109,6 +116,14 @@ export interface PendingPermissionRequest {
   receivedAt?: Date;
 }
 
+export interface TokenBudget {
+  used?: number | null;
+  total?: number | null;
+  unsupportedContext?: boolean;
+  message?: string;
+  lifetimeTokens?: number;
+}
+
 export interface QuestionOption {
   label: string;
   description?: string;
@@ -127,7 +142,6 @@ export interface ChatInterfaceProps {
   ws: WebSocket | null;
   sendMessage: (message: unknown) => void;
   latestMessage: any;
-  onFileOpen?: (filePath: string, diffInfo?: any) => void;
   onInputFocusChange?: (focused: boolean) => void;
   onSessionActive?: (sessionId?: string | null) => void;
   onSessionInactive?: (sessionId?: string | null) => void;
@@ -139,6 +153,7 @@ export interface ChatInterfaceProps {
     targetSessionId: string,
     targetProvider?: SessionProvider,
     targetProjectName?: string,
+    options?: { source?: SessionNavigationSource },
   ) => void;
   onShowSettings?: () => void;
   autoExpandTools?: boolean;
@@ -148,13 +163,13 @@ export interface ChatInterfaceProps {
   sendByCtrlEnter?: boolean;
   externalMessageUpdate?: number;
   onTaskClick?: (...args: unknown[]) => void;
-  onShowAllTasks?: (() => void) | null;
+  onStartWorkspaceQa?: (project: Project, prompt: string) => void;
   pendingAutoIntake?: PendingAutoIntake | null;
   clearPendingAutoIntake?: () => void;
   importedProjectAnalysisPrompt?: ImportedProjectAnalysisPrompt | null;
   clearImportedProjectAnalysisPrompt?: () => void;
-  onOpenShellForSession?: () => void;
   initialInputDraft?: string | null;
+  onOpenShellForSession?: () => void;
   newSessionMode?: SessionMode;
   onNewSessionModeChange?: (mode: SessionMode) => void;
 }

@@ -10,8 +10,12 @@ import { queryClaudeSDK } from '../claude-sdk.js';
 import { spawnCursor } from '../cursor-cli.js';
 import { queryCodex } from '../openai-codex.js';
 import { spawnGemini } from '../gemini-cli.js';
+import { queryGeminiApi } from '../gemini-api.js';
+import { queryOpenRouter } from '../openrouter.js';
+import { queryLocalGPU } from '../local-gpu.js';
+import { spawnNanoClaudeCode } from '../nano-claude-code.js';
 import { Octokit } from '@octokit/rest';
-import { CLAUDE_MODELS, CURSOR_MODELS, CODEX_MODELS, GEMINI_MODELS } from '../../shared/modelConstants.js';
+import { CODEX_MODELS, GEMINI_MODELS, LOCAL_MODELS, NANO_CLAUDE_CODE_MODELS, OPENROUTER_MODELS } from '../../shared/modelConstants.js';
 import { IS_PLATFORM } from '../constants/config.js';
 import { getGeminiApiKeyForUser, withGeminiApiKeyEnv } from '../utils/geminiApiKey.js';
 
@@ -857,8 +861,8 @@ router.post('/', validateExternalApiKey, async (req, res) => {
     return res.status(400).json({ error: 'message is required' });
   }
 
-  if (!['claude', 'cursor', 'codex', 'gemini'].includes(provider)) {
-    return res.status(400).json({ error: 'provider must be "claude", "cursor", "codex", or "gemini"' });
+  if (!['claude', 'cursor', 'codex', 'gemini', 'openrouter', 'local', 'nano'].includes(provider)) {
+    return res.status(400).json({ error: 'provider must be "claude", "cursor", "codex", "gemini", "openrouter", "local", or "nano"' });
   }
 
   // Validate GitHub branch/PR creation requirements
@@ -980,14 +984,58 @@ router.post('/', validateExternalApiKey, async (req, res) => {
         permissionMode: 'bypassPermissions'
       }, writer);
     } else if (provider === 'gemini') {
-      console.log('🤖 Starting Gemini CLI session');
+      console.log('🤖 Starting Gemini session');
 
-      await spawnGemini(message.trim(), {
+      const geminiOptions = {
         projectPath: finalProjectPath,
         cwd: finalProjectPath,
         sessionId: null,
         env: sessionEnv,
-        model: model || GEMINI_MODELS.DEFAULT
+        model: model || GEMINI_MODELS.DEFAULT,
+        userId: req.user?.id,
+      };
+
+      const result = await queryGeminiApi(message.trim(), geminiOptions, writer);
+      if (result?.authFailed) {
+        console.log('🤖 Falling back to Gemini CLI harness');
+        await spawnGemini(message.trim(), {
+          projectPath: finalProjectPath,
+          cwd: finalProjectPath,
+          sessionId: null,
+          env: sessionEnv,
+          model: model || GEMINI_MODELS.DEFAULT
+        }, writer);
+      }
+    } else if (provider === 'openrouter') {
+      console.log('🤖 Starting OpenRouter session');
+
+      await queryOpenRouter(message.trim(), {
+        projectPath: finalProjectPath,
+        cwd: finalProjectPath,
+        sessionId: null,
+        model: model || OPENROUTER_MODELS.DEFAULT,
+        env: sessionEnv,
+      }, writer);
+    } else if (provider === 'local') {
+      console.log('🤖 Starting Local GPU session');
+
+      await queryLocalGPU(message.trim(), {
+        projectPath: finalProjectPath,
+        cwd: finalProjectPath,
+        sessionId: null,
+        model: model || LOCAL_MODELS.DEFAULT || 'qwen3:8b',
+        env: sessionEnv,
+        permissionMode: 'bypassPermissions',
+      }, writer);
+    } else if (provider === 'nano') {
+      console.log('🤖 Starting Nano Claude Code session');
+
+      await spawnNanoClaudeCode(message.trim(), {
+        projectPath: finalProjectPath,
+        cwd: finalProjectPath,
+        sessionId: null,
+        model: model || NANO_CLAUDE_CODE_MODELS.DEFAULT,
+        env: sessionEnv,
       }, writer);
     }
 

@@ -5,11 +5,11 @@
     "changelog": "git log --pretty=format:\"* %s (%h)\" ${from}...${to}"
   },
   "npm": {
-    "publish": true
+    "publish": false
   },
   "github": {
     "release": true,
-    "releaseName": "Vibe Lab v${version}",
+    "releaseName": "Dr. Claw v${version}",
     "releaseNotes": {
       "commit": "* ${commit.subject} (${sha}){ - thanks @${author.login}!}",
       "excludeMatches": ["viper151"]

@@ -229,9 +229,11 @@ export const convertCursorSessionMessages = (blobs: CursorBlob[], projectPath: s
 
             if (part?.type === 'tool-call' || part?.type === 'tool_use') {
               if (textParts.length > 0 || reasoningText) {
+                const textContent = textParts.join('\n');
                 converted.push({
                   type: role,
-                  content: textParts.join('\n'),
+                  content: textContent,
+                  ...(role === 'user' ? { submittedContent: textContent } : {}),
                   reasoning: reasoningText ?? undefined,
                   timestamp: new Date(Date.now() + blobIdx * 1000),
                   blobId: blob.id,
@@ -360,6 +362,7 @@ export const convertCursorSessionMessages = (blobs: CursorBlob[], projectPath: s
       const message: ChatMessage = {
         type: role,
         content: text,
+        ...(role === 'user' ? { submittedContent: text } : {}),
         timestamp: new Date(Date.now() + blobIdx * 1000),
         blobId: blob.id,
         sequence: blob.sequence,
@@ -468,17 +471,21 @@ export const convertSessionMessages = (rawMessages: any[]): ChatMessage[] => {
       const visibleText = isSkillRelated ? (text || rawText.trim()) : text;
 
       // Parse <task-notification> blocks
-      const taskNotifRegex = /<task-notification>\s*<task-id>[^<]*<\/task-id>\s*<output-file>[^<]*<\/output-file>\s*<status>([^<]*)<\/status>\s*<summary>([^<]*)<\/summary>\s*<\/task-notification>/g;
+      const taskNotifRegex = /<task-notification>\s*<task-id>([^<]*)<\/task-id>\s*<output-file>([^<]*)<\/output-file>\s*<status>([^<]*)<\/status>\s*<summary>([^<]*)<\/summary>\s*<\/task-notification>/g;
       const taskNotifMatch = taskNotifRegex.exec(rawText);
       if (taskNotifMatch) {
-        const status = taskNotifMatch[1]?.trim() || 'completed';
-        const summary = taskNotifMatch[2]?.trim() || 'Background task finished';
+        const taskId = taskNotifMatch[1]?.trim() || null;
+        const outputFile = taskNotifMatch[2]?.trim() || null;
+        const status = taskNotifMatch[3]?.trim() || 'completed';
+        const summary = taskNotifMatch[4]?.trim() || 'Background task finished';
         converted.push({
           type: 'assistant',
           content: summary,
           timestamp: message.timestamp || new Date().toISOString(),
           isTaskNotification: true,
           taskStatus: status,
+          taskId,
+          taskOutputFile: outputFile,
         });
       } else if (isSkillRelated) {
         if (!visibleText) {
@@ -491,6 +498,7 @@ export const convertSessionMessages = (rawMessages: any[]): ChatMessage[] => {
         converted.push({
           type: 'user',
           content: unescapeWithMathProtection(visibleText),
+          submittedContent: unescapeWithMathProtection(rawText),
           timestamp: message.timestamp || new Date().toISOString(),
           isSkillContent: true,
         });
@@ -505,6 +513,7 @@ export const convertSessionMessages = (rawMessages: any[]): ChatMessage[] => {
         converted.push({
           type: 'user',
           content: unescapeWithMathProtection(visibleText),
+          submittedContent: unescapeWithMathProtection(rawText),
           timestamp: message.timestamp || new Date().toISOString(),
         });
       }
@@ -592,7 +601,8 @@ export const convertSessionMessages = (rawMessages: any[]): ChatMessage[] => {
         if (!message.toolCallId || convertedMessage.toolCallId === message.toolCallId) {
           convertedMessage.toolResult = {
             content: message.output || '',
-            isError: false,
+            isError: message.isError === true,
+            toolUseResult: message.toolUseResult || null,
           };
           if (convertedMessage.toolName === 'AskUserQuestion' && message.output) {
             const parsedAnswers = parseAskUserAnswers(String(message.output));

@@ -162,6 +162,36 @@ const runMigrations = () => {
       CREATE INDEX IF NOT EXISTS idx_session_tag_links_tag ON session_tag_links(tag_id);
     `);
 
+    // Migration: user_memories table
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS user_memories (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        content TEXT NOT NULL,
+        category TEXT DEFAULT 'general',
+        is_enabled BOOLEAN DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_user_memories_user ON user_memories(user_id);
+      CREATE INDEX IF NOT EXISTS idx_user_memories_user_enabled ON user_memories(user_id, is_enabled);
+    `);
+
+    // Migration: per-user memory_enabled column
+    if (!columnNames.includes('memory_enabled')) {
+      console.log('Running migration: Adding memory_enabled column');
+      db.exec('ALTER TABLE users ADD COLUMN memory_enabled BOOLEAN DEFAULT 1');
+    }
+
+    // Performance indexes for session_metadata last_activity sorting
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_session_metadata_last_activity
+        ON session_metadata(last_activity);
+      CREATE INDEX IF NOT EXISTS idx_session_metadata_project_activity
+        ON session_metadata(project_name, last_activity);
+    `);
+
     console.log('Database migrations completed successfully');
   } catch (error) {
     console.error('Error running migrations:', error.message);
@@ -1107,6 +1137,60 @@ const sessionDb = {
     }
   },
 
+  getSessionContextReview: (id) => {
+    try {
+      const session = sessionDb.getSessionById(id);
+      const files = session?.metadata?.contextReview?.files;
+      return files && typeof files === 'object' ? files : {};
+    } catch (err) {
+      console.error('Error getting session context review state:', err.message);
+      return {};
+    }
+  },
+
+  updateSessionContextReview: (id, reviews = {}) => {
+    try {
+      const existingReviews = sessionDb.getSessionContextReview(id);
+      const sanitizedReviews = Object.entries(reviews || {}).reduce((acc, [filePath, value]) => {
+        if (!filePath || typeof filePath !== 'string') {
+          return acc;
+        }
+
+        if (!value || typeof value !== 'object' || Array.isArray(value)) {
+          return acc;
+        }
+
+        const reviewedAt = typeof value.reviewedAt === 'string' ? value.reviewedAt : null;
+        const lastSeenAt = typeof value.lastSeenAt === 'string' ? value.lastSeenAt : null;
+        const lastReviewedSeenAt = typeof value.lastReviewedSeenAt === 'string' ? value.lastReviewedSeenAt : null;
+
+        acc[filePath] = {
+          reviewedAt,
+          lastSeenAt,
+          lastReviewedSeenAt,
+        };
+        return acc;
+      }, {});
+
+      const nextFiles = {
+        ...existingReviews,
+        ...sanitizedReviews,
+      };
+
+      sessionDb.updateSessionMetadata(id, {
+        contextReview: {
+          files: nextFiles,
+          updatedAt: new Date().toISOString(),
+        },
+      });
+
+      return nextFiles;
+    } catch (err) {
+      console.error('Error updating session context review state:', err.message);
+      return {};
+    }
+  },
+
   deleteSession: (id) => {
     try {
       db.prepare('DELETE FROM session_metadata WHERE id = ?').run(id);
@@ -1421,12 +1505,16 @@ const projectDb = {
   // Get project by its file-system path (uses idx_projects_path index)
   getProjectByPath: (projectPath, userId = null) => {
     try {
-      const query = userId
-        ? 'SELECT * FROM projects WHERE path = ? AND user_id = ?'
-        : 'SELECT * FROM projects WHERE path = ?';
       const row = userId
-        ? db.prepare(query).get(projectPath, userId)
-        : db.prepare(query).get(projectPath);
+        ? db.prepare(`
+            SELECT *
+            FROM projects
+            WHERE path = ?
+              AND (user_id = ? OR user_id IS NULL)
+            ORDER BY CASE WHEN user_id = ? THEN 0 ELSE 1 END
+            LIMIT 1
+          `).get(projectPath, userId, userId)
+        : db.prepare('SELECT * FROM projects WHERE path = ?').get(projectPath);
       if (row && row.metadata) {
         row.metadata = JSON.parse(row.metadata);
       }
@@ -1781,6 +1869,67 @@ const referencesDb = {
   },
 };
 
+// User memories database operations
+// User memories database operations
+const MAX_MEMORIES_PER_USER = 50;
+const MAX_MEMORY_CONTENT_LENGTH = 500;
+
+const memoryDb = {
+  create: (userId, content, category = 'general') => {
+    const count = db.prepare('SELECT COUNT(*) as count FROM user_memories WHERE user_id = ?').get(userId);
+    if (count.count >= MAX_MEMORIES_PER_USER) {
+      throw new Error(`Maximum of ${MAX_MEMORIES_PER_USER} memories per user reached`);
+    }
+    const stmt = db.prepare('INSERT INTO user_memories (user_id, content, category) VALUES (?, ?, ?)');
+    const result = stmt.run(userId, content.slice(0, MAX_MEMORY_CONTENT_LENGTH), category);
+    return db.prepare('SELECT * FROM user_memories WHERE id = ?').get(result.lastInsertRowid);
+  },
+
+  getAll: (userId) => {
+    return db.prepare('SELECT * FROM user_memories WHERE user_id = ? ORDER BY created_at DESC').all(userId);
+  },
+
+  getEnabled: (userId) => {
+    return db.prepare('SELECT * FROM user_memories WHERE user_id = ? AND is_enabled = 1 ORDER BY created_at DESC').all(userId);
+  },
+
+  getById: (userId, memoryId) => {
+    return db.prepare('SELECT * FROM user_memories WHERE id = ? AND user_id = ?').get(memoryId, userId);
+  },
+
+  update: (userId, memoryId, { content, category }) => {
+    const fields = [];
+    const params = [];
+    if (content !== undefined) { fields.push('content = ?'); params.push(content.slice(0, MAX_MEMORY_CONTENT_LENGTH)); }
+    if (category !== undefined) { fields.push('category = ?'); params.push(category); }
+    if (fields.length === 0) return null;
+    fields.push('updated_at = CURRENT_TIMESTAMP');
+    params.push(memoryId, userId);
+    db.prepare(`UPDATE user_memories SET ${fields.join(', ')} WHERE id = ? AND user_id = ?`).run(...params);
+    return db.prepare('SELECT * FROM user_memories WHERE id = ? AND user_id = ?').get(memoryId, userId);
+  },
+
+  toggle: (userId, memoryId) => {
+    db.prepare('UPDATE user_memories SET is_enabled = NOT is_enabled, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?').run(memoryId, userId);
+    return db.prepare('SELECT * FROM user_memories WHERE id = ? AND user_id = ?').get(memoryId, userId);
+  },
+
+  delete: (userId, memoryId) => {
+    const result = db.prepare('DELETE FROM user_memories WHERE id = ? AND user_id = ?').run(memoryId, userId);
+    return result.changes > 0;
+  },
+
+  getMemoryEnabled: (userId) => {
+    const row = db.prepare('SELECT memory_enabled FROM users WHERE id = ?').get(userId);
+    return row ? row.memory_enabled !== 0 : true; // default true
+  },
+
+  setMemoryEnabled: (userId, enabled) => {
+    db.prepare('UPDATE users SET memory_enabled = ? WHERE id = ?').run(enabled ? 1 : 0, userId);
+    return enabled;
+  },
+};
+
 export {
   db,
   initializeDatabase,
@@ -1794,5 +1943,6 @@ export {
   tagDb,
   projectDb,
   referencesDb,
+  memoryDb,
   normalizeSessionTimestamp
 };

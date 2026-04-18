@@ -31,8 +31,6 @@ const c = {
     dim: (text) => `${colors.dim}${text}${colors.reset}`,
 };
 
-console.log('Requested PORT from env:', process.env.PORT);
-
 import express from 'express';
 import { WebSocketServer, WebSocket } from 'ws';
 import os from 'os';
@@ -50,6 +48,9 @@ import { queryClaudeSDK, abortClaudeSDKSession, isClaudeSDKSessionActive, getCla
 import { spawnCursor, abortCursorSession, isCursorSessionActive, getCursorSessionStartTime, getActiveCursorSessions } from './cursor-cli.js';
 import { queryCodex, abortCodexSession, isCodexSessionActive, getCodexSessionStartTime, getActiveCodexSessions } from './openai-codex.js';
 import { spawnGemini, abortGeminiSession, isGeminiSessionActive, getGeminiSessionStartTime, getActiveGeminiSessions } from './gemini-cli.js';
+import { queryOpenRouter, abortOpenRouterSession, isOpenRouterSessionActive, getOpenRouterSessionStartTime, getActiveOpenRouterSessions } from './openrouter.js';
+import { queryLocalGPU, abortLocalGPUSession, isLocalGPUSessionActive, getLocalGPUSessionStartTime, getActiveLocalGPUSessions } from './local-gpu.js';
+import { spawnNanoClaudeCode, abortNanoClaudeCodeSession, isNanoClaudeCodeSessionActive, getNanoClaudeCodeSessionStartTime, getActiveNanoClaudeCodeSessions } from './nano-claude-code.js';
 import gitRoutes from './routes/git.js';
 import authRoutes from './routes/auth.js';
 import mcpRoutes from './routes/mcp.js';
@@ -57,6 +58,8 @@ import cursorRoutes from './routes/cursor.js';
 import taskmasterRoutes from './routes/taskmaster.js';
 import mcpUtilsRoutes from './routes/mcp-utils.js';
 import commandsRoutes from './routes/commands.js';
+import claudeBtwRoutes from './routes/claude-btw.js';
+import btwRoutes from './routes/btw.js';
 import settingsRoutes from './routes/settings.js';
 import agentRoutes from './routes/agent.js';
 import projectsRoutes, { WORKSPACES_ROOT, getWorkspacesRoot, validateWorkspacePath } from './routes/projects.js';
@@ -83,13 +86,16 @@ import {
     parsePortNumber,
     setRuntimePortSync,
 } from './utils/runtimePorts.js';
+import { buildCodexTokenUsageFromJsonl } from './utils/sessionTokenUsage.js';
+import { getNanoDrClawSessionsRoot } from './nanoSessionPaths.js';
 
 // File system watchers for provider project/session folders
 const PROVIDER_WATCH_PATHS = [
     { provider: 'claude', rootPath: path.join(os.homedir(), '.claude', 'projects') },
     { provider: 'cursor', rootPath: path.join(os.homedir(), '.cursor', 'chats') },
     { provider: 'codex', rootPath: path.join(os.homedir(), '.codex', 'sessions') },
-    { provider: 'gemini', rootPath: path.join(os.homedir(), '.gemini', 'sessions') }
+    { provider: 'gemini', rootPath: path.join(os.homedir(), '.gemini', 'sessions') },
+    { provider: 'nano', rootPath: getNanoDrClawSessionsRoot() },
 ];
 const WATCHER_IGNORED_PATTERNS = [
     '**/node_modules/**',
@@ -127,6 +133,11 @@ function shouldProcessProjectsWatcherEvent(eventType, filePath, provider) {
             normalized.endsWith('.sqlite') ||
             normalized.endsWith('.json')
         );
+    }
+
+    if (provider === 'nano') {
+        const base = path.basename(String(filePath || '').replace(/\\/g, '/')).toLowerCase();
+        return base.endsWith('.json') && base.startsWith('drclaw-nano-');
     }
 
     return true;
@@ -295,6 +306,15 @@ const SHELL_EMBEDDED_ENV_KEYS_TO_REMOVE = [
     'WT_SESSION',
 ];
 
+function safePtyKill(session, sessionKey) {
+    if (!session?.pty?.kill) return;
+    try {
+        session.pty.kill();
+    } catch (err) {
+        console.warn(`⚠️ Failed to kill PTY process (${sessionKey}):`, err);
+    }
+}
+
 function stripAnsiSequences(value = '') {
     return value.replace(ANSI_ESCAPE_SEQUENCE_REGEX, '');
 }
@@ -409,7 +429,14 @@ const wss = new WebSocketServer({
 // Make WebSocket server available to routes
 app.locals.wss = wss;
 
-app.use(cors());
+// Parse VITE_PORT early so CORS reflects the actual frontend port.
+const CORS_VITE_PORT = parsePortNumber(process.env.VITE_PORT, DEFAULT_FRONTEND_PORT);
+app.use(cors({
+  origin: process.env.DR_CLAW_CORS_ORIGINS
+    ? process.env.DR_CLAW_CORS_ORIGINS.split(',').map((o) => o.trim()).filter(Boolean)
+    : [`http://localhost:${getFrontendPortSync(CORS_VITE_PORT)}`, `http://127.0.0.1:${getFrontendPortSync(CORS_VITE_PORT)}`],
+  credentials: true,
+}));
 app.use(express.json({
   limit: '50mb',
   type: (req) => {
@@ -425,11 +452,21 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // Public health check endpoint (no authentication required)
 app.get('/health', (req, res) => {
-  res.json({
+  const isDesktop = process.env.DR_CLAW_DESKTOP === '1';
+  const response = {
     status: 'ok',
     timestamp: new Date().toISOString(),
-    installMode
-  });
+    installMode: isDesktop ? 'desktop' : installMode,
+  };
+
+  if (isDesktop) {
+    response.desktop = {
+      platform: process.platform,
+      arch: process.arch,
+    };
+  }
+
+  res.json(response);
 });
 
 // Optional API key validation (if configured)
@@ -458,6 +495,11 @@ app.use('/api/mcp-utils', authenticateToken, mcpUtilsRoutes);
 
 // Commands API Routes (protected)
 app.use('/api/commands', authenticateToken, commandsRoutes);
+
+// Ephemeral side question (/btw) — unified multi-provider endpoint
+app.use('/api/btw', authenticateToken, btwRoutes);
+// Legacy Claude-only /btw endpoint (backward compat)
+app.use('/api/claude', authenticateToken, claudeBtwRoutes);
 
 // Settings API Routes (protected)
 app.use('/api/settings', authenticateToken, settingsRoutes);
@@ -652,6 +694,13 @@ app.use(express.static(path.join(__dirname, '../dist'), {
 // System update endpoint
 app.post('/api/system/update', authenticateToken, async (req, res) => {
     try {
+        if (process.env.DR_CLAW_DESKTOP === '1') {
+            return res.status(400).json({
+                success: false,
+                error: 'Desktop builds do not support in-app self-update yet. Install a newer desktop package instead.'
+            });
+        }
+
         // Get the project root directory (parent of server directory)
         const projectRoot = path.join(__dirname, '..');
 
@@ -659,7 +708,7 @@ app.post('/api/system/update', authenticateToken, async (req, res) => {
 
         // Run the update command based on installation mode
         const updateCommand = installMode === 'git'
-            ? 'git checkout main && git pull && npm install'
+            ? 'git stash && git checkout main && git pull && npm install'
             : `npm install -g ${npmPackageName}@latest`;
 
         const child = spawn('sh', ['-c', updateCommand], {
@@ -839,6 +888,45 @@ app.put('/api/projects/:projectName/sessions/:sessionId/tags', authenticateToken
             source: 'manual',
         });
         res.json({ success: true, tags });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.get('/api/projects/:projectName/sessions/:sessionId/context-review', authenticateToken, async (req, res) => {
+    try {
+        const { projectName, sessionId } = req.params;
+        const session = sessionDb.getSessionById(sessionId);
+
+        if (!session || session.project_name !== projectName) {
+            return res.status(404).json({ error: 'Session not found' });
+        }
+
+        res.json({
+            sessionId,
+            projectName,
+            reviews: sessionDb.getSessionContextReview(sessionId),
+        });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.put('/api/projects/:projectName/sessions/:sessionId/context-review', authenticateToken, async (req, res) => {
+    try {
+        const { projectName, sessionId } = req.params;
+        const { reviews } = req.body || {};
+        const session = sessionDb.getSessionById(sessionId);
+
+        if (!session || session.project_name !== projectName) {
+            return res.status(404).json({ error: 'Session not found' });
+        }
+
+        res.json({
+            sessionId,
+            projectName,
+            reviews: sessionDb.updateSessionContextReview(sessionId, reviews),
+        });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
@@ -1561,6 +1649,94 @@ function handleChatConnection(ws, request) {
                 spawnGemini(data.command, { ...data.options, env: sessionEnv }, writer).catch(error => {
                     console.error('[ERROR] Gemini spawn error:', error);
                 });
+            } else if (data.type === 'openrouter-command') {
+                console.log('[DEBUG] OpenRouter message:', data.command || '[Continue/Resume]');
+                console.log('📁 Project:', data.options?.projectPath || data.options?.cwd || 'Unknown');
+                console.log('🔄 Session:', data.options?.sessionId ? 'Resume' : 'New');
+                console.log('🤖 Model:', data.options?.model || 'default');
+                const commandTelemetryEnabled = data.options?.telemetryEnabled !== false;
+                const sessionId = data.options?.sessionId || data.sessionId;
+
+                if (sessionId && isOpenRouterSessionActive(sessionId)) {
+                    console.log(`[WARN] OpenRouter session ${sessionId} is already active. Ignoring concurrent request.`);
+                    return;
+                }
+
+                enqueueConversationTelemetry(
+                    {
+                        name: 'agent_dialogue_meta',
+                        direction: 'user_to_agent',
+                        provider: 'openrouter',
+                        sessionId: sessionId || null,
+                        projectPath: data.options?.projectPath || data.options?.cwd || null,
+                        transportType: data.type,
+                    },
+                    { ...telemetryContext, telemetryEnabled: commandTelemetryEnabled },
+                );
+                writer.telemetryContext = { ...telemetryContext, provider: 'openrouter', telemetryEnabled: commandTelemetryEnabled };
+                writer.setProjectPath(data.options?.projectPath || data.options?.cwd || null);
+                queryOpenRouter(data.command, { ...data.options, env: sessionEnv }, writer).catch(error => {
+                    console.error('[ERROR] OpenRouter query error:', error);
+                });
+            } else if (data.type === 'local-command') {
+                console.log('[DEBUG] Local GPU message:', data.command || '[Continue/Resume]');
+                console.log('📁 Project:', data.options?.projectPath || data.options?.cwd || 'Unknown');
+                console.log('🔄 Session:', data.options?.sessionId ? 'Resume' : 'New');
+                console.log('🤖 Model:', data.options?.model || 'default');
+                console.log('🖥️ Server:', data.options?.serverUrl || 'default');
+                const commandTelemetryEnabled = data.options?.telemetryEnabled !== false;
+                const sessionId = data.options?.sessionId || data.sessionId;
+
+                if (sessionId && isLocalGPUSessionActive(sessionId)) {
+                    console.log(`[WARN] Local GPU session ${sessionId} is already active. Ignoring concurrent request.`);
+                    return;
+                }
+
+                enqueueConversationTelemetry(
+                    {
+                        name: 'agent_dialogue_meta',
+                        direction: 'user_to_agent',
+                        provider: 'local',
+                        sessionId: sessionId || null,
+                        projectPath: data.options?.projectPath || data.options?.cwd || null,
+                        transportType: data.type,
+                    },
+                    { ...telemetryContext, telemetryEnabled: commandTelemetryEnabled },
+                );
+                writer.telemetryContext = { ...telemetryContext, provider: 'local', telemetryEnabled: commandTelemetryEnabled };
+                writer.setProjectPath(data.options?.projectPath || data.options?.cwd || null);
+                queryLocalGPU(data.command, { ...data.options, env: sessionEnv }, writer).catch(error => {
+                    console.error('[ERROR] Local GPU query error:', error);
+                });
+            } else if (data.type === 'nano-command') {
+                console.log('[DEBUG] Nano Claude Code message:', data.command || '[Continue/Resume]');
+                console.log('📁 Project:', data.options?.projectPath || data.options?.cwd || 'Unknown');
+                console.log('🔄 Session:', data.options?.sessionId ? 'Resume' : 'New');
+                console.log('🤖 Model:', data.options?.model || 'default');
+                const commandTelemetryEnabled = data.options?.telemetryEnabled !== false;
+                const sessionId = data.options?.sessionId || data.sessionId;
+
+                if (sessionId && isNanoClaudeCodeSessionActive(sessionId)) {
+                    console.log(`[WARN] Nano Claude Code session ${sessionId} is already active. Ignoring concurrent request.`);
+                    return;
+                }
+
+                enqueueConversationTelemetry(
+                    {
+                        name: 'agent_dialogue_meta',
+                        direction: 'user_to_agent',
+                        provider: 'nano',
+                        sessionId: sessionId || null,
+                        projectPath: data.options?.projectPath || data.options?.cwd || null,
+                        transportType: data.type,
+                    },
+                    { ...telemetryContext, telemetryEnabled: commandTelemetryEnabled },
+                );
+                writer.telemetryContext = { ...telemetryContext, provider: 'nano', telemetryEnabled: commandTelemetryEnabled };
+                writer.setProjectPath(data.options?.projectPath || data.options?.cwd || null);
+                spawnNanoClaudeCode(data.command, { ...data.options, env: sessionEnv }, writer).catch(error => {
+                    console.error('[ERROR] Nano Claude Code error:', error);
+                });
             } else if (data.type === 'cursor-resume') {
                 // Backward compatibility: treat as cursor-command with resume and no prompt
                 console.log('[DEBUG] Cursor resume session (compat):', data.sessionId);
@@ -1590,6 +1766,12 @@ function handleChatConnection(ws, request) {
                     success = abortCodexSession(data.sessionId);
                 } else if (provider === 'gemini') {
                     success = abortGeminiSession(data.sessionId);
+                } else if (provider === 'openrouter') {
+                    success = abortOpenRouterSession(data.sessionId);
+                } else if (provider === 'local') {
+                    success = abortLocalGPUSession(data.sessionId);
+                } else if (provider === 'nano') {
+                    success = abortNanoClaudeCodeSession(data.sessionId);
                 } else {
                     // Use Claude Agents SDK
                     success = await abortClaudeSDKSession(data.sessionId);
@@ -1638,6 +1820,15 @@ function handleChatConnection(ws, request) {
                 } else if (provider === 'gemini') {
                     isActive = isGeminiSessionActive(sessionId);
                     startTime = getGeminiSessionStartTime(sessionId);
+                } else if (provider === 'openrouter') {
+                    isActive = isOpenRouterSessionActive(sessionId);
+                    startTime = getOpenRouterSessionStartTime(sessionId);
+                } else if (provider === 'local') {
+                    isActive = isLocalGPUSessionActive(sessionId);
+                    startTime = getLocalGPUSessionStartTime(sessionId);
+                } else if (provider === 'nano') {
+                    isActive = isNanoClaudeCodeSessionActive(sessionId);
+                    startTime = getNanoClaudeCodeSessionStartTime(sessionId);
                 } else {
                     // Use Claude Agents SDK
                     isActive = isClaudeSDKSessionActive(sessionId);
@@ -1657,7 +1848,9 @@ function handleChatConnection(ws, request) {
                     claude: getActiveClaudeSDKSessions(),
                     cursor: getActiveCursorSessions(),
                     codex: getActiveCodexSessions(),
-                    gemini: getActiveGeminiSessions()
+                    gemini: getActiveGeminiSessions(),
+                    local: getActiveLocalGPUSessions(),
+                    nano: getActiveNanoClaudeCodeSessions()
                 };
 
                 writer.send({
@@ -1728,7 +1921,7 @@ function handleShellConnection(ws) {
                     if (oldSession) {
                         console.log('🧹 Cleaning up existing login session:', ptySessionKey);
                         if (oldSession.timeoutId) clearTimeout(oldSession.timeoutId);
-                        if (oldSession.pty && oldSession.pty.kill) oldSession.pty.kill();
+                        safePtyKill(oldSession, ptySessionKey);
                         ptySessionsMap.delete(ptySessionKey);
                     }
                 }
@@ -2060,9 +2253,7 @@ function handleShellConnection(ws) {
 
                 session.timeoutId = setTimeout(() => {
                     console.log('⏰ PTY session timeout, killing process:', ptySessionKey);
-                    if (session.pty && session.pty.kill) {
-                        session.pty.kill();
-                    }
+                    safePtyKill(session, ptySessionKey);
                     ptySessionsMap.delete(ptySessionKey);
                 }, PTY_SESSION_TIMEOUT);
             }
@@ -2278,9 +2469,7 @@ function handleComputeShellConnection(ws, urlNodeId) {
                 session.ws = null;
                 session.timeoutId = setTimeout(() => {
                     console.log('⏰ Compute PTY session timeout, killing:', ptySessionKey);
-                    if (session.pty && session.pty.kill) {
-                        session.pty.kill();
-                    }
+                    safePtyKill(session, ptySessionKey);
                     ptySessionsMap.delete(ptySessionKey);
                 }, PTY_SESSION_TIMEOUT);
             }
@@ -2579,36 +2768,7 @@ app.get('/api/projects/:projectName/sessions/:sessionId/token-usage', authentica
         }
         throw error;
       }
-      const lines = fileContent.trim().split('\n');
-      let totalTokens = 0;
-      let contextWindow = 200000; // Default for Codex/OpenAI
-
-      // Find the latest token_count event with info (scan from end)
-      for (let i = lines.length - 1; i >= 0; i--) {
-        try {
-          const entry = JSON.parse(lines[i]);
-
-          // Codex stores token info in event_msg with type: "token_count"
-          if (entry.type === 'event_msg' && entry.payload?.type === 'token_count' && entry.payload?.info) {
-            const tokenInfo = entry.payload.info;
-            if (tokenInfo.total_token_usage) {
-              totalTokens = tokenInfo.total_token_usage.total_tokens || 0;
-            }
-            if (tokenInfo.model_context_window) {
-              contextWindow = tokenInfo.model_context_window;
-            }
-            break; // Stop after finding the latest token count
-          }
-        } catch (parseError) {
-          // Skip lines that can't be parsed
-          continue;
-        }
-      }
-
-      return res.json({
-        used: totalTokens,
-        total: contextWindow
-      });
+      return res.json(buildCodexTokenUsageFromJsonl(fileContent));
     }
 
     // Handle Gemini sessions
@@ -3005,6 +3165,7 @@ async function getFileTree(dirPath, maxDepth = 3, currentDepth = 0, showHidden =
 const REQUESTED_PORT = parsePortNumber(process.env.PORT, DEFAULT_BACKEND_PORT);
 const REQUESTED_VITE_PORT = parsePortNumber(process.env.VITE_PORT, DEFAULT_FRONTEND_PORT);
 const HOST = process.env.HOST || '0.0.0.0';
+const IS_DESKTOP = process.env.DR_CLAW_DESKTOP === '1';
 // Show localhost when binding to all interfaces; 0.0.0.0 is not directly connectable.
 const DISPLAY_HOST = HOST === '0.0.0.0' ? 'localhost' : HOST;
 
@@ -3020,6 +3181,9 @@ async function startServer() {
 
         // Log Claude implementation mode
         console.log(`${c.info('[INFO]')} Using Claude Agents SDK for Claude integration`);
+        if (IS_DESKTOP) {
+            console.log(`${c.info('[INFO]')} Running inside Electron desktop shell`);
+        }
         console.log(`${c.info('[INFO]')} Running in ${c.bright(isProduction ? 'PRODUCTION' : 'DEVELOPMENT')} mode`);
 
         if (!isProduction) {

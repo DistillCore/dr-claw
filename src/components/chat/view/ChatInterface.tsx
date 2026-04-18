@@ -1,15 +1,19 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import QuickSettingsPanel from '../../QuickSettingsPanel';
+import CodeEditor from '../../CodeEditor';
 import ChatTaskProgressPill from './subcomponents/ChatTaskProgressPill';
 import { useTasksSettings } from '../../../contexts/TasksSettingsContext';
 import { useTaskMaster } from '../../../contexts/TaskMasterContext';
 import { useTranslation } from 'react-i18next';
 import ChatMessagesPane from './subcomponents/ChatMessagesPane';
 import ChatComposer from './subcomponents/ChatComposer';
-import SkillShortcutsPanel from './subcomponents/SkillShortcutsPanel';
+import BtwOverlay from './subcomponents/BtwOverlay';
+import ChatContextSidebar from './subcomponents/ChatContextSidebar';
+import GuidedPromptStarter from './subcomponents/GuidedPromptStarter';
 import { RESUMING_STATUS_TEXT } from '../types/types';
 import type { ChatInterfaceProps } from '../types/types';
 import type { ProviderAvailability } from '../types/types';
+import type { ChatMessage } from '../types/types';
 import { useChatProviderState } from '../hooks/useChatProviderState';
 import { useChatSessionState } from '../hooks/useChatSessionState';
 import { useChatRealtimeHandlers } from '../hooks/useChatRealtimeHandlers';
@@ -19,18 +23,24 @@ import { authenticatedFetch } from '../../../utils/api';
 import { readCliAvailability, writeCliAvailability } from '../../../utils/cliAvailability';
 import { Button } from '../../ui/button';
 import type { PendingAutoIntake } from '../../../types/app';
-import { CLAUDE_MODELS, CURSOR_MODELS, CODEX_MODELS, GEMINI_MODELS } from '../../../../shared/modelConstants';
-
+import type { EditingFile, DiffInfo } from '../../main-content/types/types';
+import { CLAUDE_MODELS, CURSOR_MODELS, CODEX_MODELS, GEMINI_MODELS, LOCAL_MODELS, NANO_CLAUDE_CODE_MODELS, OPENROUTER_MODELS } from '../../../../shared/modelConstants';
+import { getProviderDisplayName } from '../utils/chatFormatting';
+import { buildEditableMessageDraft, buildReplayMessageDraft, getChatMessageId, getMessageReplayContent } from '../utils/chatMessages';
+import { normalizePath, toRelativePath, isSafePath, fileNameFromPath } from '../../../utils/pathUtils';
+import { useDeviceSettings } from '../../../hooks/useDeviceSettings';
 
 const DEFAULT_PROVIDER_AVAILABILITY: Record<Provider, ProviderAvailability> = {
   claude: { cliAvailable: true, cliCommand: 'claude', installHint: null },
   cursor: { cliAvailable: true, cliCommand: 'agent', installHint: null },
   codex: { cliAvailable: true, cliCommand: 'codex', installHint: null },
   gemini: { cliAvailable: true, cliCommand: 'gemini', installHint: null },
+  openrouter: { cliAvailable: true, cliCommand: 'openrouter', installHint: null },
+  local: { cliAvailable: true, cliCommand: null, installHint: null },
+  nano: { cliAvailable: true, cliCommand: 'nano-claude-code', installHint: null },
 };
 
 const INTAKE_GREETING = `Hello! I'm your Dr. Claw research assistant, here to help you set up your research pipeline.\n\nTo get started, could you tell me about your research field or topic?`;
-const WORKSPACE_QA_GREETING = `Ask about any file, module, or implementation detail in this workspace. I will stay focused on code and project structure unless you explicitly ask to start research planning.`;
 
 const getAutoIntakePrompt = (pendingAutoIntake?: PendingAutoIntake | null) => {
   const prompt = pendingAutoIntake?.prompt?.trim();
@@ -51,12 +61,16 @@ const ANALYSIS_PROVIDERS: Array<{ id: Provider; label: string }> = [
   { id: 'claude', label: 'Claude Code' },
   { id: 'gemini', label: 'Gemini CLI' },
   { id: 'codex', label: 'Codex' },
+  { id: 'openrouter', label: 'OpenRouter' },
 ];
 
 const getProviderModelConfig = (provider: Provider) => {
   if (provider === 'claude') return CLAUDE_MODELS;
   if (provider === 'codex') return CODEX_MODELS;
   if (provider === 'gemini') return GEMINI_MODELS;
+  if (provider === 'openrouter') return OPENROUTER_MODELS;
+  if (provider === 'local') return LOCAL_MODELS;
+  if (provider === 'nano') return NANO_CLAUDE_CODE_MODELS;
   return CURSOR_MODELS;
 };
 
@@ -65,13 +79,14 @@ type PendingViewSession = {
   startedAt: number;
 };
 
+type SidebarTab = 'context' | 'research' | 'files' | 'shell' | 'git';
+
 function ChatInterface({
   selectedProject,
   selectedSession,
   ws,
   sendMessage,
   latestMessage,
-  onFileOpen,
   onInputFocusChange,
   onSessionActive,
   onSessionInactive,
@@ -87,19 +102,54 @@ function ChatInterface({
   autoScrollToBottom,
   sendByCtrlEnter,
   externalMessageUpdate,
-  onShowAllTasks,
+  onStartWorkspaceQa,
   pendingAutoIntake,
   clearPendingAutoIntake,
   importedProjectAnalysisPrompt,
   clearImportedProjectAnalysisPrompt,
-  onOpenShellForSession,
   newSessionMode = 'research',
   onNewSessionModeChange,
 }: ChatInterfaceProps) {
   const { tasksEnabled, isTaskMasterInstalled } = useTasksSettings();
   const { refreshTasks } = useTaskMaster();
   const { t } = useTranslation('chat');
+  const { isMobile } = useDeviceSettings({ trackPWA: false });
   const [isShellEditPromptOpen, setIsShellEditPromptOpen] = useState(false);
+  const [editingFile, setEditingFile] = useState<EditingFile | null>(null);
+
+  const handleFileOpen = useCallback((filePath: string, diffInfo?: unknown) => {
+    const root = selectedProject?.fullPath || selectedProject?.path || '';
+    const relative = toRelativePath(filePath, root);
+    if (!relative || !isSafePath(relative)) return;
+    const name = fileNameFromPath(normalizePath(filePath));
+    setEditingFile({
+      name,
+      path: relative,
+      projectName: selectedProject?.name,
+      diffInfo: (diffInfo ?? null) as DiffInfo | null,
+    });
+  }, [selectedProject]);
+
+  const handleCloseEditor = useCallback(() => {
+    setEditingFile(null);
+  }, []);
+
+  const [sidebarTab, setSidebarTab] = useState<SidebarTab>(() => {
+    if (typeof window === 'undefined') return 'context';
+    const stored = window.localStorage.getItem('chat-sidebar-active-tab');
+    if (stored === 'research' || stored === 'files' || stored === 'shell' || stored === 'git') return stored;
+    return 'context';
+  });
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return window.localStorage.getItem('chat-session-context-collapsed') === '1';
+  });
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('chat-sidebar-active-tab', sidebarTab);
+    }
+  }, [sidebarTab]);
 
   const streamBufferRef = useRef('');
   const streamTimerRef = useRef<number | null>(null);
@@ -124,6 +174,12 @@ function ChatInterface({
     setCodexModel,
     geminiModel,
     setGeminiModel,
+    openrouterModel,
+    setOpenrouterModel,
+    localModel,
+    setLocalModel,
+    nanoModel,
+    setNanoModel,
     permissionMode,
     pendingPermissionRequests,
     setPendingPermissionRequests,
@@ -163,6 +219,8 @@ function ChatInterface({
     showLoadAllOverlay,
     claudeStatus,
     setClaudeStatus,
+    statusTextOverride,
+    setStatusTextOverride,
     createDiff,
     scrollContainerRef,
     scrollToBottom,
@@ -181,6 +239,10 @@ function ChatInterface({
     pendingViewSessionRef,
   });
 
+  const chatMessagesForBtwRef = useRef(chatMessages);
+  chatMessagesForBtwRef.current = chatMessages;
+  const getChatMessagesForBtw = useCallback(() => chatMessagesForBtwRef.current, []);
+
   const {
     input,
     setInput,
@@ -191,6 +253,10 @@ function ChatInterface({
     isTextareaExpanded,
     thinkingMode,
     setThinkingMode,
+    codexReasoningEffort,
+    setCodexReasoningEffort,
+    geminiThinkingMode,
+    setGeminiThinkingMode,
     slashCommandsCount,
     filteredCommands,
     frequentCommands,
@@ -231,6 +297,10 @@ function ChatInterface({
     setIntakeGreeting,
     setPendingStageTagKeys,
     submitProgrammaticInput,
+    btwOverlay,
+    closeBtwOverlay,
+    submitProgrammaticMessage,
+    loadMessageIntoComposer,
   } = useChatComposerState({
     selectedProject,
     selectedSession,
@@ -242,6 +312,9 @@ function ChatInterface({
     claudeModel,
     codexModel,
     geminiModel,
+    openrouterModel,
+    localModel,
+    nanoModel,
     isLoading,
     canAbortSession,
     tokenBudget,
@@ -249,7 +322,7 @@ function ChatInterface({
     sendByCtrlEnter,
     onSessionActive,
     onInputFocusChange,
-    onFileOpen,
+    onFileOpen: handleFileOpen,
     onShowSettings,
     pendingViewSessionRef,
     scrollToBottom,
@@ -261,6 +334,7 @@ function ChatInterface({
     setIsUserScrolledUp,
     setPendingPermissionRequests,
     newSessionMode,
+    getChatMessagesForBtw,
   });
 
   useChatRealtimeHandlers({
@@ -274,6 +348,7 @@ function ChatInterface({
     setIsLoading,
     setCanAbortSession,
     setClaudeStatus,
+    setStatusTextOverride,
     setTokenBudget,
     setIsSystemSessionChange,
     setPendingPermissionRequests,
@@ -288,18 +363,56 @@ function ChatInterface({
     onNavigateToSession,
   });
 
-  const chatMessagesRef = useRef(chatMessages);
-  chatMessagesRef.current = chatMessages;
-
   const handleRetry = useCallback(() => {
-    const msgs = chatMessagesRef.current;
-    let lastUserMessage: (typeof msgs)[number] | undefined;
+    const msgs = chatMessagesForBtwRef.current;
+    let lastUserMessage: ChatMessage | undefined;
     for (let i = msgs.length - 1; i >= 0; i--) {
       if (msgs[i].type === 'user') { lastUserMessage = msgs[i]; break; }
     }
-    if (!lastUserMessage?.content) return;
-    submitProgrammaticInput(lastUserMessage.content);
-  }, [submitProgrammaticInput]);
+    if (!lastUserMessage) return;
+    const replayDraft = buildReplayMessageDraft(lastUserMessage);
+    if (!replayDraft) return;
+    submitProgrammaticMessage(replayDraft);
+  }, [submitProgrammaticMessage]);
+
+  const handleCopyMessage = useCallback(async (message: ChatMessage) => {
+    const text = getMessageReplayContent(message).trim();
+    if (!text || typeof navigator === 'undefined' || !navigator.clipboard?.writeText) {
+      return false;
+    }
+
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch (error) {
+      console.error('Failed to copy message text:', error);
+      return false;
+    }
+  }, []);
+
+  const handleResendMessage = useCallback((message: ChatMessage) => {
+    const replayDraft = buildReplayMessageDraft(message);
+    if (!replayDraft) {
+      return;
+    }
+
+    submitProgrammaticMessage(replayDraft);
+  }, [submitProgrammaticMessage]);
+
+  const handleEditMessage = useCallback((message: ChatMessage) => {
+    const editableDraft = buildEditableMessageDraft(message);
+    if (!editableDraft) {
+      return;
+    }
+
+    const didLoad = loadMessageIntoComposer({
+      ...editableDraft,
+      editingMessageId: getChatMessageId(message),
+    });
+    if (didLoad) {
+      scrollToBottomAndReset();
+    }
+  }, [loadMessageIntoComposer, scrollToBottomAndReset]);
 
   const autoIntakeTriggeredRef = useRef(false);
   const lastAutoIntakeTriggerIdRef = useRef<string | null>(null);
@@ -333,6 +446,9 @@ function ChatInterface({
       cursor: cached.cursor ?? DEFAULT_PROVIDER_AVAILABILITY.cursor,
       codex: cached.codex ?? DEFAULT_PROVIDER_AVAILABILITY.codex,
       gemini: cached.gemini ?? DEFAULT_PROVIDER_AVAILABILITY.gemini,
+      openrouter: cached.openrouter ?? DEFAULT_PROVIDER_AVAILABILITY.openrouter,
+      local: cached.local ?? DEFAULT_PROVIDER_AVAILABILITY.local,
+      nano: cached.nano ?? DEFAULT_PROVIDER_AVAILABILITY.nano,
     };
   });
 
@@ -340,8 +456,11 @@ function ChatInterface({
     if (importedProjectAnalysisProvider === 'claude') return claudeModel;
     if (importedProjectAnalysisProvider === 'codex') return codexModel;
     if (importedProjectAnalysisProvider === 'gemini') return geminiModel;
+    if (importedProjectAnalysisProvider === 'openrouter') return openrouterModel;
+    if (importedProjectAnalysisProvider === 'local') return localModel;
+    if (importedProjectAnalysisProvider === 'nano') return nanoModel;
     return cursorModel;
-  }, [claudeModel, codexModel, cursorModel, geminiModel, importedProjectAnalysisProvider]);
+  }, [claudeModel, codexModel, cursorModel, geminiModel, openrouterModel, localModel, nanoModel, importedProjectAnalysisProvider]);
 
   const handleStartTaskInChat = useCallback((prompt?: string, task?: { stage?: string } | null) => {
     const nextPrompt = prompt && prompt.trim()
@@ -361,6 +480,8 @@ function ChatInterface({
         { provider: 'cursor', endpoint: '/api/cli/cursor/status', fallbackCommand: 'agent' },
         { provider: 'codex', endpoint: '/api/cli/codex/status', fallbackCommand: 'codex' },
         { provider: 'gemini', endpoint: '/api/cli/gemini/status', fallbackCommand: 'gemini' },
+        { provider: 'openrouter', endpoint: '/api/cli/openrouter/status', fallbackCommand: 'openrouter' },
+        { provider: 'nano', endpoint: '/api/cli/nano/status', fallbackCommand: 'nano-claude-code' },
       ];
 
       const results = await Promise.all(checks.map(async ({ provider: nextProvider, endpoint, fallbackCommand }) => {
@@ -406,7 +527,7 @@ function ChatInterface({
 
   useEffect(() => {
     if (providerAvailability[provider]?.cliAvailable === false) {
-      const fallbackProvider = (['claude', 'cursor', 'codex', 'gemini'] as const).find(
+      const fallbackProvider = (['claude', 'cursor', 'codex', 'gemini', 'openrouter', 'local', 'nano'] as const).find(
         (candidate) => providerAvailability[candidate]?.cliAvailable !== false,
       );
 
@@ -492,6 +613,28 @@ function ChatInterface({
   useEffect(() => {
     setIsShellEditPromptOpen(false);
   }, [selectedProject?.name, selectedSession?.id]);
+
+  useEffect(() => {
+    setEditingFile(null);
+  }, [selectedSession?.id, selectedProject?.name]);
+
+  useEffect(() => {
+    if (!editingFile) {
+      return undefined;
+    }
+
+    const handlePreviewEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.repeat || event.defaultPrevented) {
+        return;
+      }
+
+      event.stopPropagation();
+      setEditingFile(null);
+    };
+
+    document.addEventListener('keydown', handlePreviewEscape);
+    return () => document.removeEventListener('keydown', handlePreviewEscape);
+  }, [editingFile]);
 
   useEffect(() => {
     if (!isLoading || !canAbortSession) {
@@ -600,11 +743,11 @@ function ChatInterface({
   ]);
 
   const handleOpenShellEditPrompt = useCallback(() => {
-    if (!selectedSession || !onOpenShellForSession) {
+    if (!selectedSession) {
       return;
     }
     setIsShellEditPromptOpen(true);
-  }, [onOpenShellForSession, selectedSession]);
+  }, [selectedSession]);
 
   const handleCloseShellEditPrompt = useCallback(() => {
     setIsShellEditPromptOpen(false);
@@ -612,16 +755,14 @@ function ChatInterface({
 
   const handleConfirmOpenShell = useCallback(() => {
     setIsShellEditPromptOpen(false);
-    onOpenShellForSession?.();
-  }, [onOpenShellForSession]);
+    setSidebarTab('shell');
+    setIsSidebarCollapsed(false);
+  }, []);
+
+  const isEmpty = chatMessages.length === 0 && !isLoadingSessionMessages && !selectedSession && !currentSessionId;
 
   if (!selectedProject) {
-    const selectedProviderLabel =
-      provider === 'cursor'
-        ? t('messageTypes.cursor')
-        : provider === 'codex'
-          ? t('messageTypes.codex')
-          : t('messageTypes.claude');
+    const selectedProviderLabel = getProviderDisplayName(provider);
 
     return (
       <>
@@ -638,7 +779,7 @@ function ChatInterface({
         <div className="flex justify-end px-4 pb-4">
           <ChatTaskProgressPill
             onStartTask={handleStartTaskInChat}
-            onShowAllTasks={onShowAllTasks}
+            onShowAllTasks={() => setSidebarTab('research')}
           />
         </div>
       </>
@@ -647,7 +788,9 @@ function ChatInterface({
 
   return (
     <>
-      <div className="h-full flex flex-col">
+      <div className={`h-full flex min-h-0 ${isMobile ? 'flex-col' : 'flex-row'}`}>
+        <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+          <div className={`flex min-h-0 flex-1 flex-col ${isEmpty ? 'justify-start pt-[18vh] overflow-y-auto' : ''}`}>
         {shouldShowImportedProjectAnalysisPrompt && (
           <div className="mx-auto mt-4 w-full max-w-3xl px-3 sm:px-4">
             <div className="rounded-xl border border-border bg-card/95 shadow-sm px-4 py-4 sm:px-5">
@@ -724,18 +867,6 @@ function ChatInterface({
           intakeGreeting={intakeGreeting}
           currentSessionId={currentSessionId}
           provider={provider}
-          setProvider={(nextProvider) => setProvider(nextProvider as Provider)}
-          textareaRef={textareaRef}
-          setInput={setInput}
-          setAttachedPrompt={setAttachedPrompt}
-          claudeModel={claudeModel}
-          setClaudeModel={setClaudeModel}
-          cursorModel={cursorModel}
-          setCursorModel={setCursorModel}
-          codexModel={codexModel}
-          setCodexModel={setCodexModel}
-          geminiModel={geminiModel}
-          setGeminiModel={setGeminiModel}
           isLoadingMoreMessages={isLoadingMoreMessages}
           hasMoreMessages={hasMoreMessages}
           totalMessages={totalMessages}
@@ -749,47 +880,41 @@ function ChatInterface({
           loadAllJustFinished={loadAllJustFinished}
           showLoadAllOverlay={showLoadAllOverlay}
           createDiff={createDiff}
-          onFileOpen={onFileOpen}
+          onFileOpen={handleFileOpen}
           onShowSettings={onShowSettings}
           onGrantToolPermission={handleGrantToolPermission}
-          onSuggestShellEdit={handleOpenShellEditPrompt}
           autoExpandTools={autoExpandTools}
           showRawParameters={showRawParameters}
           showThinking={showThinking}
           selectedProject={selectedProject}
           isLoading={isLoading}
-          providerAvailability={providerAvailability}
+          statusText={statusTextOverride || claudeStatus?.text}
           newSessionMode={newSessionMode}
-          onNewSessionModeChange={onNewSessionModeChange}
           onRetry={handleRetry}
+          onCopyMessage={handleCopyMessage}
+          onResendMessage={handleResendMessage}
+          onEditMessage={handleEditMessage}
+          onSuggestShellEdit={handleOpenShellEditPrompt}
         />
-
-        <div className="px-2 sm:px-4 max-w-5xl mx-auto w-full">
-          <div className="flex gap-4">
-            <div className="flex-1 min-w-0">
-              <SkillShortcutsPanel setInput={setInput} textareaRef={textareaRef} setAttachedPrompt={setAttachedPrompt} />
-            </div>
-            <div className="flex-1 min-w-0">
-              <ChatTaskProgressPill
-                onStartTask={handleStartTaskInChat}
-                onShowAllTasks={onShowAllTasks}
-              />
-            </div>
-          </div>
-        </div>
 
         <ChatComposer
           pendingPermissionRequests={pendingPermissionRequests}
           handlePermissionDecision={handlePermissionDecision}
           handleGrantToolPermission={handleGrantToolPermission}
-          claudeStatus={claudeStatus}
+          claudeStatus={claudeStatus ? { ...claudeStatus, text: statusTextOverride || claudeStatus.text } : claudeStatus}
           isLoading={isLoading}
           onAbortSession={handleAbortSession}
           provider={provider}
           permissionMode={permissionMode}
           onModeSwitch={cyclePermissionMode}
+          codexModel={codexModel}
+          geminiModel={geminiModel}
           thinkingMode={thinkingMode}
           setThinkingMode={setThinkingMode}
+          codexReasoningEffort={codexReasoningEffort}
+          setCodexReasoningEffort={setCodexReasoningEffort}
+          geminiThinkingMode={geminiThinkingMode}
+          setGeminiThinkingMode={setGeminiThinkingMode}
           tokenBudget={tokenBudget}
           slashCommandsCount={slashCommandsCount}
           onToggleCommandMenu={handleToggleCommandMenu}
@@ -821,6 +946,7 @@ function ChatInterface({
           renderInputWithMentions={renderInputWithMentions}
           textareaRef={textareaRef}
           input={input}
+          setInput={setInput}
           onInputChange={handleInputChange}
           onTextareaClick={handleTextareaClick}
           onTextareaKeyDown={handleKeyDown}
@@ -829,16 +955,11 @@ function ChatInterface({
           onTextareaInput={handleTextareaInput}
           onInputFocusChange={handleInputFocusChange}
           isInputFocused={isInputFocused}
-          placeholder={t('input.placeholder', {
-            provider:
-              provider === 'cursor'
-                ? t('messageTypes.cursor')
-                : provider === 'codex'
-                ? t('messageTypes.codex')
-                : provider === 'gemini'
-                ? t('messageTypes.gemini')
-                : t('messageTypes.claude'),
-          })}
+          placeholder={
+            isEmpty && newSessionMode === 'workspace_qa'
+              ? t('session.mode.workspaceQaPlaceholder', { defaultValue: 'Ask about any file, module, or implementation detail...' })
+              : t('input.placeholder', { provider: getProviderDisplayName(provider) })
+          }
           isTextareaExpanded={isTextareaExpanded}
           sendByCtrlEnter={sendByCtrlEnter}
           onTranscript={handleTranscript}
@@ -851,6 +972,63 @@ function ChatInterface({
           onUpdateAttachedPrompt={(text) =>
             setAttachedPrompt((prev) => prev ? { ...prev, promptText: text } : null)
           }
+          centered={isEmpty}
+          setAttachedPrompt={setAttachedPrompt}
+          setProvider={(next) => setProvider(next as Provider)}
+          claudeModel={claudeModel}
+          setClaudeModel={setClaudeModel}
+          cursorModel={cursorModel}
+          setCursorModel={setCursorModel}
+          setCodexModel={setCodexModel}
+          setGeminiModel={setGeminiModel}
+          openrouterModel={openrouterModel}
+          setOpenrouterModel={setOpenrouterModel}
+          localModel={localModel}
+          setLocalModel={setLocalModel}
+          nanoModel={nanoModel}
+          setNanoModel={setNanoModel}
+          providerAvailability={providerAvailability}
+          newSessionMode={newSessionMode}
+          onNewSessionModeChange={onNewSessionModeChange}
+        />
+
+        {isEmpty && newSessionMode === 'research' && (
+          <GuidedPromptStarter
+            projectName={selectedProject?.name || ''}
+            setInput={setInput}
+            textareaRef={textareaRef}
+            setAttachedPrompt={setAttachedPrompt}
+          />
+        )}
+
+        {editingFile && selectedProject && (
+          <CodeEditor
+            file={editingFile}
+            onClose={handleCloseEditor}
+            projectPath={selectedProject.fullPath || selectedProject.path}
+            selectedProject={selectedProject}
+            onStartWorkspaceQa={onStartWorkspaceQa}
+            displayMode="embedded"
+          />
+        )}
+
+          </div>
+        </div>
+
+        <ChatContextSidebar
+          selectedProject={selectedProject}
+          selectedSession={selectedSession}
+          currentSessionId={currentSessionId}
+          provider={provider}
+          newSessionMode={newSessionMode}
+          chatMessages={chatMessages}
+          onFileOpen={handleFileOpen}
+          activeSidebarTab={sidebarTab}
+          onSidebarTabChange={setSidebarTab}
+          isCollapsed={isSidebarCollapsed}
+          onCollapsedChange={setIsSidebarCollapsed}
+          onStartWorkspaceQa={onStartWorkspaceQa}
+          onStartTask={handleStartTaskInChat}
         />
       </div>
 
@@ -882,6 +1060,7 @@ function ChatInterface({
       )}
 
       <QuickSettingsPanel />
+      <BtwOverlay state={btwOverlay} onClose={closeBtwOverlay} />
     </>
   );
 }

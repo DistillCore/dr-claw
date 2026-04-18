@@ -108,6 +108,13 @@ export const api = {
     }
     return authenticatedFetch(url);
   },
+  sessionContextReview: (projectName, sessionId) =>
+    authenticatedFetch(`/api/projects/${projectName}/sessions/${sessionId}/context-review`),
+  updateSessionContextReview: (projectName, sessionId, reviews) =>
+    authenticatedFetch(`/api/projects/${projectName}/sessions/${sessionId}/context-review`, {
+      method: 'PUT',
+      body: JSON.stringify({ reviews }),
+    }),
   renameProject: (projectName, displayName) =>
     authenticatedFetch(`/api/projects/${projectName}/rename`, {
       method: 'PUT',
@@ -148,11 +155,13 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(workspaceData),
     }),
-  readFile: (projectName, filePath) =>
-    authenticatedFetch(`/api/projects/${projectName}/file?filePath=${encodeURIComponent(filePath)}`),
+  readFile: (projectName, filePath, options = {}) =>
+    authenticatedFetch(`/api/projects/${projectName}/file?filePath=${encodeURIComponent(filePath)}`, options),
+  resolveSkill: (skillName, workingDir) =>
+    authenticatedFetch(`/api/skills/resolve?name=${encodeURIComponent(skillName)}&workingDir=${encodeURIComponent(workingDir || '')}`),
   /** Fetch binary file content (e.g. PDF) as Blob. absolutePath must be the full filesystem path. */
-  getFileContentBlob: (projectName, absolutePath) =>
-    authenticatedFetch(`/api/projects/${projectName}/files/content?path=${encodeURIComponent(absolutePath)}`).then((r) => {
+  getFileContentBlob: (projectName, absolutePath, options = {}) =>
+    authenticatedFetch(`/api/projects/${projectName}/files/content?path=${encodeURIComponent(absolutePath)}`, options).then((r) => {
       if (!r.ok) throw new Error(r.status === 404 ? 'Not found' : `HTTP ${r.status}`);
       return r.blob();
     }),
@@ -167,7 +176,7 @@ export const api = {
       body: JSON.stringify({ filePath }),
     }),
   getFiles: (projectName, options = {}) => {
-    const { path, maxDepth, showHidden, ...fetchOptions } = options || {};
+    const { path, maxDepth, showHidden, metadata, ...fetchOptions } = options || {};
     const params = new URLSearchParams();
 
     if (typeof path === 'string' && path) {
@@ -178,6 +187,9 @@ export const api = {
     }
     if (showHidden !== undefined && showHidden !== null) {
       params.append('showHidden', String(showHidden));
+    }
+    if (metadata !== undefined && metadata !== null) {
+      params.append('metadata', String(metadata));
     }
 
     const query = params.toString();
@@ -411,6 +423,8 @@ export const api = {
     slurmSalloc: (id, opts) => authenticatedFetch(`/api/compute/nodes/${id}/slurm/salloc`, { method: 'POST', body: JSON.stringify(opts) }),
     slurmSbatch: (id, opts) => authenticatedFetch(`/api/compute/nodes/${id}/slurm/sbatch`, { method: 'POST', body: JSON.stringify(opts) }),
     slurmCancel: (id, jobId) => authenticatedFetch(`/api/compute/nodes/${id}/slurm/cancel/${jobId}`, { method: 'POST' }),
+    monitorNode: (id) => authenticatedFetch(`/api/compute/nodes/${id}/monitor`),
+    monitorLocal: () => authenticatedFetch('/api/compute/local/monitor'),
     // Backward-compatible
     getConfig: () => authenticatedFetch('/api/compute/config'),
     configure: (config) => authenticatedFetch('/api/compute/configure', { method: 'POST', body: JSON.stringify(config) }),
@@ -418,5 +432,23 @@ export const api = {
     sync: (direction, cwd) => authenticatedFetch('/api/compute/sync', { method: 'POST', body: JSON.stringify({ direction, cwd }) }),
     run: (command, cwd, skipSync) => authenticatedFetch('/api/compute/run', { method: 'POST', body: JSON.stringify({ command, cwd, skipSync }) }),
     status: () => authenticatedFetch('/api/compute/status'),
+  },
+
+  // Community tools configuration
+  communityTools: {
+    configure: (projectPath, mcpBackend, apiKeys, gpuConfig) =>
+      authenticatedFetch('/api/community-tools/configure', {
+        method: 'POST',
+        body: JSON.stringify({ projectPath, mcpBackend, apiKeys, gpuConfig }),
+      }),
+    getStatus: (projectPath) =>
+      authenticatedFetch(`/api/community-tools/status?path=${encodeURIComponent(projectPath)}`),
+    getComputeNodes: () =>
+      authenticatedFetch('/api/community-tools/compute-nodes'),
+    detectGpu: (nodeId) =>
+      authenticatedFetch('/api/community-tools/detect-gpu', {
+        method: 'POST',
+        body: JSON.stringify({ nodeId }),
+      }),
   },
 };
